@@ -122,7 +122,7 @@ This will:
 ├── plots/               # Pre-computed visualization results
 └── README.md            # This file
 ```
-In the plot directory, you can find the computational cost in terms of execution time for each combination of Routin algorithm/number of nodes/loss model. There are some artefacts for AODV due to simulation errors that have been set aside.
+In the plots/ directory, you can find the computational cost in terms of execution time for each combination of Routin algorithm/number of nodes/loss model. There are some artefacts for AODV due to simulation errors that have been set aside.
 
 ## Citation
 
