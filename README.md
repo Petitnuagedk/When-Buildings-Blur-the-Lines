@@ -38,8 +38,8 @@ Before getting started, ensure you have:
 
 1. Clone this repository:
    ```bash
-   git clone <repository-url>
-   cd when-buildings-blur-lines
+   git clone https://github.com/Petitnuagedk/When-Buildings-Blur-the-Lines
+   cd When-Buildings-Blur-the-Lines
    ```
 
 2. Copy simulation files to ns-3:
