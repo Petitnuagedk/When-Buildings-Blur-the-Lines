@@ -830,7 +830,7 @@ int main (int argc, char *argv[])
     }
 
     double StartTime = 5;
-    double EndTime = 60; // To modify to 3600 (s)
+    double EndTime = 300;
 
     // Set randomness
     RngSeedManager::SetSeed(Seed);
