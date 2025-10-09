@@ -94,6 +94,8 @@ UrbanCompDir/
 └── ...
 ```
 
+In the plot directory, you can find the computational cost in terms of execution time for each combination of Routin algorithm/number of nodes/loss model. There are some artefacts for AODV due to simulation errors that have been set aside.
+
 **Total Storage**: Approximately 370 MB
 
 ### Generating Plots
