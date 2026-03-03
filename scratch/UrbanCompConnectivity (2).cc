@@ -260,7 +260,7 @@ int main (int argc, char *argv[])
 {   
     std::string RA = "aodv";
     std::string proto = "UDP";
-    int numNodes = 60;
+    int numNodes = 50;
     int numBuildings = -1;
     double ratioSource = 0.1; // % of source per Node in the network. number of source is the same as numebr of sink
     double transmissionRate = 50;
@@ -308,7 +308,7 @@ int main (int argc, char *argv[])
         yMaxBound = 750;
         yMinBound = -750;
 
-    int Seed = 42; // your chosen identifier
+    int Seed = 0; // your chosen identifier
     std::mt19937 rng(Seed); // deterministic random number generator
     std::shuffle(points.begin(), points.end(), rng);
 
@@ -357,10 +357,10 @@ int main (int argc, char *argv[])
         //std::cout << "setting up loss model : " << lossModel << std::endl;
         wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
     }
-    else if (lossModel == "Nakagami")
+    else if (lossModel == "itu")
     {
         //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::NakagamiPropagationLossModel");
+        wifiChannel.AddPropagationLoss("ns3::ItuR1411LosPropagationLossModel");
     }
     else if (lossModel == "LogDistancePropagationLossModel")
     {

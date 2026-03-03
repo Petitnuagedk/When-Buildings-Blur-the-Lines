@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Mitsuba 3 scene for Sionna RT / ns-3 co-simulation
+    Band        : 2.4 GHz (802.11b/g/n)
+    Building mat: Concrete  er=5.31  sigma=0.326 S/m  (ITU-R P.2040-3)
+    Ground mat  : Dry earth er=3.00  sigma=0.015 S/m  (ITU-R P.2040-3)
+    Building H  : 20.0 m
+    Node height : 5.0 m AGL
+-->
+<scene version="3.0.0">
+
+    <!-- ===================== MATERIALS ===================== -->
+
+    <!-- Concrete walls at 2.4 GHz -->
+    <bsdf type="twosided" id="mat-concrete">
+        <bsdf type="diffuse">
+            <rgb name="reflectance" value="0.44, 0.44, 0.44"/>
+        </bsdf>
+    </bsdf>
+
+    <!-- Ground (dry concrete pavement / dry earth at 2.4 GHz) -->
+    <bsdf type="twosided" id="mat-ground">
+        <bsdf type="diffuse">
+            <rgb name="reflectance" value="0.20, 0.20, 0.20"/>
+        </bsdf>
+    </bsdf>
+
+    <!-- ===================== GROUND PLANE ===================== -->
+    <shape type="rectangle" id="ground_plane">
+        <ref id="mat-ground"/>
+        <transform name="to_world">
+            <scale x="650.0" y="650.0" z="1.0"/>
+            <translate x="0.0" y="0.0" z="0.0"/>
+        </transform>
+    </shape>
+
+    <!-- ===================== BUILDINGS ===================== -->
+    <!-- Building 00: x=[-650,-550] y=[-650,-550] z=[0,20] -->
+    <shape type="cube" id="building_00">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-600.0" y="-600.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 01: x=[-650,-550] y=[550,650] z=[0,20] -->
+    <shape type="cube" id="building_01">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-600.0" y="600.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 02: x=[550,650] y=[-650,-550] z=[0,20] -->
+    <shape type="cube" id="building_02">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="600.0" y="-600.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 03: x=[550,650] y=[550,650] z=[0,20] -->
+    <shape type="cube" id="building_03">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="600.0" y="600.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 04: x=[-550,-450] y=[-350,-250] z=[0,20] -->
+    <shape type="cube" id="building_04">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-500.0" y="-300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 05: x=[-550,-450] y=[-50,50] z=[0,20] -->
+    <shape type="cube" id="building_05">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-500.0" y="0.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 06: x=[-550,-450] y=[250,350] z=[0,20] -->
+    <shape type="cube" id="building_06">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-500.0" y="300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 07: x=[-350,-250] y=[-550,-450] z=[0,20] -->
+    <shape type="cube" id="building_07">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-300.0" y="-500.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 08: x=[-350,-250] y=[-350,-250] z=[0,20] -->
+    <shape type="cube" id="building_08">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-300.0" y="-300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 09: x=[-350,-250] y=[-150,-50] z=[0,20] -->
+    <shape type="cube" id="building_09">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-300.0" y="-100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 10: x=[-350,-250] y=[50,150] z=[0,20] -->
+    <shape type="cube" id="building_10">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-300.0" y="100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 11: x=[-350,-250] y=[250,350] z=[0,20] -->
+    <shape type="cube" id="building_11">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-300.0" y="300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 12: x=[-350,-250] y=[450,550] z=[0,20] -->
+    <shape type="cube" id="building_12">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-300.0" y="500.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 13: x=[-150,-50] y=[-350,-250] z=[0,20] -->
+    <shape type="cube" id="building_13">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-100.0" y="-300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 14: x=[-150,-50] y=[-150,-50] z=[0,20] -->
+    <shape type="cube" id="building_14">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-100.0" y="-100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 15: x=[-150,-50] y=[50,150] z=[0,20] -->
+    <shape type="cube" id="building_15">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-100.0" y="100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 16: x=[-150,-50] y=[250,350] z=[0,20] -->
+    <shape type="cube" id="building_16">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="-100.0" y="300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 17: x=[-50,50] y=[-550,-450] z=[0,20] -->
+    <shape type="cube" id="building_17">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="0.0" y="-500.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 18: x=[-50,50] y=[450,550] z=[0,20] -->
+    <shape type="cube" id="building_18">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="0.0" y="500.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 19: x=[50,150] y=[-350,-250] z=[0,20] -->
+    <shape type="cube" id="building_19">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="100.0" y="-300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 20: x=[50,150] y=[-150,-50] z=[0,20] -->
+    <shape type="cube" id="building_20">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="100.0" y="-100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 21: x=[50,150] y=[50,150] z=[0,20] -->
+    <shape type="cube" id="building_21">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="100.0" y="100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 22: x=[50,150] y=[250,350] z=[0,20] -->
+    <shape type="cube" id="building_22">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="100.0" y="300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 23: x=[250,350] y=[-550,-450] z=[0,20] -->
+    <shape type="cube" id="building_23">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="300.0" y="-500.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 24: x=[250,350] y=[-350,-250] z=[0,20] -->
+    <shape type="cube" id="building_24">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="300.0" y="-300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 25: x=[250,350] y=[-150,-50] z=[0,20] -->
+    <shape type="cube" id="building_25">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="300.0" y="-100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 26: x=[250,350] y=[50,150] z=[0,20] -->
+    <shape type="cube" id="building_26">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="300.0" y="100.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 27: x=[250,350] y=[250,350] z=[0,20] -->
+    <shape type="cube" id="building_27">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="300.0" y="300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 28: x=[250,350] y=[450,550] z=[0,20] -->
+    <shape type="cube" id="building_28">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="300.0" y="500.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 29: x=[450,550] y=[-350,-250] z=[0,20] -->
+    <shape type="cube" id="building_29">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="500.0" y="-300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 30: x=[450,550] y=[-50,50] z=[0,20] -->
+    <shape type="cube" id="building_30">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="500.0" y="0.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 31: x=[450,550] y=[250,350] z=[0,20] -->
+    <shape type="cube" id="building_31">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="500.0" y="300.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 32: x=[550,650] y=[-650,-550] z=[0,20] -->
+    <shape type="cube" id="building_32">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="600.0" y="-600.0" z="10.0"/>
+        </transform>
+    </shape>
+    <!-- Building 33: x=[550,650] y=[550,650] z=[0,20] -->
+    <shape type="cube" id="building_33">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="50.0" z="10.0"/>
+            <translate x="600.0" y="600.0" z="10.0"/>
+        </transform>
+    </shape>
+
+    <!-- ===================== NODE HEIGHT REFERENCE ===================== -->
+    <!--
+        Mobile TX/RX nodes travel at z = 5.0 m AGL.
+        Place Sionna emitters/receivers at this altitude.
+        Example (set in Python, not XML):
+            scene.tx.position = [x, y, 5.0]
+            scene.rx.position = [x, y, 5.0]
+    -->
+
+</scene>
