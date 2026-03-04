@@ -1,42 +1,4 @@
-// m3
-
-/**
- *
- * The example uses default 30 GHz operation, 18 MHz equivalent LTE bandwidth
- * (100 RBs), and `ThreeGppAntennaModel` elements arranged in small planar arrays.
- *
- *
- * Common command-line options (and defaults):
- *  - frequency:   Operating frequency in Hz (default 30e9)
- *  - txPow:       Tx power in dBm (default 49.0)
- *  - noiseFigure: Noise figure in dB (default 9.0)
- *  - distance:    Distance between tx and rx in meters (default 50.0)
- *  - simTime:     Simulation time in milliseconds (default 2000)
- *  - timeRes:     Time resolution for periodic SNR compute (ms) (default 10)
- *  - IsImageRenderedEnabled: Enable rendering of scene images (default true)
- *  - outputFileName:      Output filename for scene images (default "sionna-rt-scene3-")
- *  - outputFileDirectory: Directory for scene image output (default "sionna-rt-images2")
- *
- * The example also exposes several Sionna RT path solver configuration parameters:
- *  - maxDepth: maximum reflection/refraction depth
- *  - los: include line-of-sight
- *  - specularReflection: enable specular reflections
- *  - diffuseReflection: enable diffuse reflections
- *  - diffraction: enable diffraction
- *  - edge_diffraction: enable edge diffraction
- *  - refraction: enable refractions
- *  - syntheticArray: use synthetic array processing
- *  - seed: random seed used by the path solver
- *
- * The main computed outputs are:
- *  - Per-iteration SNR
- *  - Average rx power
- *  - A log file named "snr-trace.txt" containing time-stamped SNR values
- *
- * @note The channel update period is set using the ns-3 attribute:
- *       ns3::SionnaRtChannelModel::UpdatePeriod
- *
- */
+// variant of sionna-rt-custom with connectivity/mobility logging
 
 #include "pybind11/pybind11.h"
 
@@ -54,9 +16,6 @@
 #include "ns3/propagation-delay-model.h"
 #include "ns3/spectrum-helper.h"
 #include "ns3/single-model-spectrum-channel.h"
-// Note: we use the LTE spectrum helpers by default.  The ISM helper
-// caused compile failures on systems where it wasn't available, so we
-// no longer include its header or reference it.
 #include "ns3/net-device.h"
 #include "ns3/node-container.h"
 #include "ns3/node.h"
@@ -65,19 +24,19 @@
 #include "ns3/spectrum-signal-parameters.h"
 #include "ns3/three-gpp-antenna-model.h"
 #include "ns3/uniform-planar-array.h"
+#include "ns3/ipv4-l3-protocol.h" // for drop reasons
 
 #include <fstream>
 #include <sstream>
-#include <numeric> // for std::iota used when creating PSD vectors
+#include <numeric>
 #include <map>
 #include <tuple>
 #include <vector>
 #include <algorithm>
 #include <iostream>
 
-NS_LOG_COMPONENT_DEFINE("SionnaRTChannelExample");
-namespace py = pybind11;
 using namespace ns3;
+namespace py = pybind11;
 
 // global guard against scheduling beyond stop time
 static double g_simStopTime = 0.0;
@@ -86,12 +45,25 @@ static double g_simStopTime = 0.0;
 static Ptr<SionnaRtSpectrumPropagationLossModel>
     m_spectrumLossModel; //!< the SpectrumPropagationLossModel object
 
+// connectivity/mobility globals from UrbanCompConnectivity
+static Ipv4InterfaceContainer g_ifaces;
+static std::vector<std::vector<uint32_t>> receivedProbes;
+static std::vector<std::vector<std::vector<uint32_t>>> timeReceivedProbes;
+static std::vector<std::vector<std::tuple<double,double,double>>> nodePositions;
 
-/**
- * @brief A structure that holds the parameters for the
- * ComputeSnr function. In this way the problem with the limited
- * number of parameters of method Schedule is avoided.
- */
+// additional globals for sionna metrics may be defined later
+
+NS_LOG_COMPONENT_DEFINE("SionnaRTConnectExample");
+
+// forward declarations for connectivity helpers
+void RecordNodePositions(NodeContainer nodes);
+void SchedulePositionRecording(NodeContainer nodes);
+void ReceiveProbe(Ptr<Socket> socket);
+void SendProbes(Ptr<Node> sender, Ipv4InterfaceContainer ifaces);
+
+// traffic metric definitions and helper routines taken from sionna-rt-custom
+
+// declare parameters for scheduled SNR computation
 struct ComputeSnrParams
 {
     Ptr<MobilityModel> txMob;        //!< the tx mobility model
@@ -102,7 +74,7 @@ struct ComputeSnrParams
     Ptr<PhasedArrayModel> rxAntenna; //!< the rx antenna array
 };
 
-// ------------------- application traffic metric structures -------------------
+// per‑level traffic counters
 struct NetwortkLevelTraffic {
     uint32_t RouteSignalizationPacketsSent = 0;
     uint32_t RouteSignalizationPacketsReceived = 0;
@@ -125,7 +97,7 @@ struct NodeLevelTraffic {
 std::map<uint32_t, NodeLevelTraffic> nodeleveltrafficMap;
 
 struct FlowInformation {
-    std::tuple<Ipv4Address, Ipv4Address, uint16_t> FlowPrint = {Ipv4Address("127.0.0.1"), Ipv4Address("127.0.0.1"), 0}; // Source, Destination, Port
+    std::tuple<Ipv4Address, Ipv4Address, uint16_t> FlowPrint = {Ipv4Address("127.0.0.1"), Ipv4Address("127.0.0.1"), 0};
     uint32_t FlowID = -1;
     Ipv4Address SourceIP = Ipv4Address("127.0.0.1");
     Ipv4Address Destination = Ipv4Address("127.0.0.1");
@@ -135,15 +107,12 @@ struct FlowInformation {
     double LastTxTime = -1;
     double FirstRxTime = -1;
     double LastRxTime = -1;
-    double sumDelay = 0.0; // Average delay in seconds
-    std::vector<uint64_t> seqNums = {}; // Sequence numbers of packets in the flow to avoid redudancy
+    double sumDelay = 0.0;
+    std::vector<uint64_t> seqNums = {};
 };
 
 std::map<uint32_t, FlowInformation> FlowInformationMap;
 
-// Callback invoked whenever the IPv4 layer sends a packet.  We inspect the
-// header and update flow/node/network counters.  This is essentially a
-// slightly simplified version of the logic taken from UrbanCompSub.cc.
 static void
 IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t interface)
 {
@@ -163,21 +132,17 @@ IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t interfac
         nodeleveltrafficMap[from->GetObject<Node>()->GetId()].DevicePacketsSent++;
         destinationPort = udpHeader.GetDestinationPort();
     } else {
-        // not a UDP packet -> nothing more to do
         return;
     }
 
-    // Application port used in this example
     if (destinationPort != 4000)
     {
         networkLevelTraffic.RouteSignalizationPacketsSent++;
-        // we don't track routing details in this simple example
         return;
     }
 
     if (from->GetAddress(interface, 0).GetLocal() == source)
     {
-        // extract sequence number from SeqTsHeader if present
         int16_t sequenceNumber = -1;
         SeqTsHeader seqTsHeader;
         if (packetCopy->PeekHeader(seqTsHeader)) {
@@ -236,7 +201,6 @@ IpPacketReceivedCallback(Ptr<const Packet> packet, Ptr<Ipv4> to, uint32_t interf
         nodeleveltrafficMap[to->GetObject<Node>()->GetId()].DevicePacketsReceived++;
         destinationPort = udpHeader.GetDestinationPort();
     } else {
-        // not a UDP packet
         return;
     }
 
@@ -357,7 +321,6 @@ WriteAllMetricsToCsv()
     }
 }
 
-
 static void
 LogSimTime()
 {
@@ -373,12 +336,6 @@ LogSimTime()
     }
 }
 
-/**
- * Perform the beamforming using the DFT beamforming method
- * @param thisDevice the device performing the beamforming
- * @param thisAntenna the antenna object associated to thisDevice
- * @param otherDevice the device towards which point the beam
- */
 static void
 DoBeamforming(Ptr<NetDevice> thisDevice,
               Ptr<PhasedArrayModel> thisAntenna,
@@ -420,9 +377,6 @@ DoBeamforming(Ptr<NetDevice> thisDevice,
     thisAntenna->SetBeamformingVector(antennaWeights);
 }
 
-/**
- * Print the python executable and version
- */
 static void
 PrintPythonExecutable()
 {
@@ -431,11 +385,6 @@ PrintPythonExecutable()
     py::print("Python version:", sys.attr("version"));
 }
 
-/**
- * Compute the average SNR
- * @param params A structure that holds the parameters that are needed to perform calculations in
- * ComputeSnr
- */
 static void
 ComputeSnr(ComputeSnrParams params)
 {
@@ -485,6 +434,71 @@ ComputeSnr(ComputeSnrParams params)
     f << Simulator::Now().GetSeconds() << " " << 10 * log10(Sum(*rxPsd) / Sum(*noisePsd))
       << std::endl;
     f.close();
+}
+
+
+// connectivity helpers implementation
+
+void
+RecordNodePositions(NodeContainer nodes)
+{
+    std::vector<std::tuple<double,double,double>> current;
+    for (auto it = nodes.Begin(); it != nodes.End(); ++it) {
+        Ptr<Node> n = *it;
+        Ptr<MobilityModel> m = n->GetObject<MobilityModel>();
+        Vector p = m->GetPosition();
+        current.emplace_back(p.x,p.y,p.z);
+    }
+    nodePositions.push_back(current);
+}
+
+void
+SchedulePositionRecording(NodeContainer nodes)
+{
+    RecordNodePositions(nodes);
+    if (Simulator::Now().GetSeconds() + 1.0 < g_simStopTime) {
+        Simulator::Schedule(Seconds(1.0), &SchedulePositionRecording, nodes);
+    }
+}
+
+void
+ReceiveProbe(Ptr<Socket> socket)
+{
+    Ptr<Packet> pkt;
+    Address from;
+    while ((pkt = socket->RecvFrom(from))) {
+        Ipv4Address addr = InetSocketAddress::ConvertFrom(from).GetIpv4();
+        for (uint32_t i = 0; i < g_ifaces.GetN(); ++i) {
+            if (g_ifaces.GetAddress(i) == addr) {
+                Ptr<Node> recv = socket->GetNode();
+                uint32_t rid = recv->GetId();
+                receivedProbes[i][rid] = 1;
+                break;
+            }
+        }
+    }
+}
+
+void
+SendProbes(Ptr<Node> sender, Ipv4InterfaceContainer ifaces)
+{
+    uint32_t sid = sender->GetId();
+    if (sid == 0) {
+        timeReceivedProbes.push_back(receivedProbes);
+    }
+    for (auto &row : receivedProbes) std::fill(row.begin(), row.end(), 0);
+    for (uint32_t j = 0; j < ifaces.GetN(); ++j) {
+        if (j == sid) continue;
+        Ptr<Socket> sock = Socket::CreateSocket(sender, UdpSocketFactory::GetTypeId());
+        InetSocketAddress dest(ifaces.GetAddress(j), 9999);
+        sock->Connect(dest);
+        Ptr<Packet> p = Create<Packet>((uint8_t*)&sid, sizeof(sid));
+        sock->Send(p);
+        sock->Close();
+    }
+    if (Simulator::Now().GetSeconds() + 1.0 < g_simStopTime) {
+        Simulator::Schedule(Seconds(1.0), &SendProbes, sender, ifaces);
+    }
 }
 
 int
@@ -589,7 +603,7 @@ main(int argc, char* argv[])
 
     if (verbose)
     {
-        LogComponentEnable("SionnaRTChannelExample", LOG_LEVEL_INFO);
+        LogComponentEnable("SionnaRTConnectExample", LOG_LEVEL_INFO);
     }
 
     // set the channel update period used by the Sionna RT channel model
@@ -732,9 +746,24 @@ main(int argc, char* argv[])
     address.SetBase("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
+    // --- connectivity addition ---
+    g_ifaces = interfaces;
+    receivedProbes.assign(nodes.GetN(), std::vector<uint32_t>(nodes.GetN(), 0));
+    timeReceivedProbes.clear();
+    nodePositions.clear();
+    Simulator::Schedule(Seconds(2.0), &SchedulePositionRecording, nodes);
+    for (uint32_t i = 0; i < nodes.GetN(); ++i) {
+        Ptr<Node> n = nodes.Get(i);
+        Ptr<Socket> sock = Socket::CreateSocket(n, UdpSocketFactory::GetTypeId());
+        sock->Bind(InetSocketAddress(Ipv4Address::GetAny(), 9999));
+        sock->SetRecvCallback(MakeCallback(&ReceiveProbe));
+    }
+    for (uint32_t i = 0; i < nodes.GetN(); ++i) {
+        Simulator::Schedule(Seconds(2.0), &SendProbes, nodes.Get(i), interfaces);
+    }
+
     // --- attach IP layer tracing for metrics ---
-    for (uint32_t i = 0; i < nodes.GetN(); ++i)
-    {
+    for (uint32_t i = 0; i < nodes.GetN(); ++i) {
         Ptr<Ipv4> ipv4 = nodes.Get(i)->GetObject<Ipv4>();
         ipv4->TraceConnectWithoutContext("Tx", MakeCallback(&IpPacketSentCallback));
         ipv4->TraceConnectWithoutContext("Rx", MakeCallback(&IpPacketReceivedCallback));
@@ -752,8 +781,7 @@ main(int argc, char* argv[])
     mobility.Install(nodes);
 
     // set initial positions from CSV
-    for (uint32_t i = 0; i < nodes.GetN(); ++i)
-    {
+    for (uint32_t i = 0; i < nodes.GetN(); ++i) {
         nodes.Get(i)->GetObject<MobilityModel>()->SetPosition(positions[i]);
     }
 
@@ -764,8 +792,7 @@ main(int argc, char* argv[])
     // set up UDP client/server pairs for scaled connectivity
     int sources = std::min<int>(numSource, nodes.GetN() / 2);
     uint16_t port = 4000;
-    for (int i = 0; i < sources; ++i)
-    {
+    for (int i = 0; i < sources; ++i) {
         uint32_t clientIdx = i;
         uint32_t serverIdx = (i + sources) % nodes.GetN();
 
@@ -793,14 +820,12 @@ main(int argc, char* argv[])
                                                        UintegerValue(1),
                                                        "NumRows",
                                                        UintegerValue(2));
-    if (!enableGnbIso)
-    {
+    if (!enableGnbIso) {
         txAntenna->SetAttribute("AntennaElement",
                                 PointerValue(CreateObject<ThreeGppAntennaModel>()));
     }
 
-    if (enableGnbDualPolarized)
-    {
+    if (enableGnbDualPolarized) {
         txAntenna->SetAttribute("IsDualPolarized", BooleanValue(true));
     }
     Ptr<PhasedArrayModel> rxAntenna =
@@ -808,14 +833,12 @@ main(int argc, char* argv[])
                                                        UintegerValue(2),
                                                        "NumRows",
                                                        UintegerValue(2));
-    if (!enableUeIso)
-    {
+    if (!enableUeIso) {
         rxAntenna->SetAttribute("AntennaElement",
                                 PointerValue(CreateObject<ThreeGppAntennaModel>()));
     }
 
-    if (enableUeDualPolarized)
-    {
+    if (enableUeDualPolarized) {
         rxAntenna->SetAttribute("IsDualPolarized", BooleanValue(true));
     }
     // set the beamforming vectors
@@ -824,8 +847,7 @@ main(int argc, char* argv[])
 
     // schedule periodic SNR computations; track maximum scheduled time
     double lastSnrTime = 0.0;
-    for (int i = 0; i < floor(endTime / timeRes); i++)
-    {
+    for (int i = 0; i < floor(endTime / timeRes); i++) {
         double t = timeRes * i;
         ComputeSnrParams params{txMob, rxMob, txPow, noiseFigure, txAntenna, rxAntenna};
         Simulator::Schedule(Seconds(t), &ComputeSnr, params);
@@ -857,6 +879,26 @@ main(int argc, char* argv[])
 
     // write collected traffic metrics after simulation finishes
     WriteAllMetricsToCsv();
+
+    // write connectivity & mobility result files
+    std::ofstream connFile("connectivityM-rt.csv");
+    for (auto &mat : timeReceivedProbes) {
+        for (auto &row : mat) {
+            for (auto v: row) connFile << v << ",";
+            connFile << "\n";
+        }
+        connFile << "\n";
+    }
+    connFile.close();
+
+    std::ofstream mobFile("mobility-rt.csv");
+    for (auto &frame : nodePositions) {
+        for (auto &pos : frame) {
+            mobFile << std::get<0>(pos) << "," << std::get<1>(pos) << "," << std::get<2>(pos) << "\n";
+        }
+        mobFile << "\n";
+    }
+    mobFile.close();
 
     Simulator::Destroy();
     return 0;
