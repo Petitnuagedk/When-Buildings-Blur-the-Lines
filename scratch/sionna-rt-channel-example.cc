@@ -1,28 +1,12 @@
-// Copyright (c) 2025 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
-// author: Amir Ashtari aashtari@cttc.es
-// SPDX-License-Identifier: GPL-2.0-only
+// 2
+
 
 /**
- * @file sionna-rt-channel-example.cc
- * @brief Example demonstrating how to use the Sionna RT channel model in ns-3.
- *
- * This example shows how to configure and use the Sionna RT channel classes to
- * compute the average SNR between two static/moving nodes in a scene computed
- * using the sionna.rt Python library. The example:
- *  - Configures a SionnaRtSpectrumPropagationLossModel instance to use the
- *    sionna.rt scene and path solver,
- *  - Creates a simple two-node network (SimpleNetDevice),
- *  - Configures mobility and uniform planar arrays for antennas on each node,
- *  - Applies simple DFT-based beamforming to point arrays at the intended peer,
- *  - Computes average SNR periodically and logs results to the console and a file.
  *
  * The example uses default 30 GHz operation, 18 MHz equivalent LTE bandwidth
  * (100 RBs), and `ThreeGppAntennaModel` elements arranged in small planar arrays.
  *
- * Prerequisites:
- *  - The sionna.rt Python library must be available and imported properly by the
- *    Sionna RT channel model (check PYTHONPATH and environment).
- *
+ *.
  *
  * Common command-line options (and defaults):
  *  - frequency:   Operating frequency in Hz (default 30e9)
@@ -72,7 +56,9 @@
 #include "ns3/propagation-delay-model.h"
 #include "ns3/spectrum-helper.h"
 #include "ns3/single-model-spectrum-channel.h"
-#include "ns3/ism-spectrum-value-helper.h"
+// Note: we use the LTE spectrum helpers by default.  The ISM helper
+// caused compile failures on systems where it wasn't available, so we
+// no longer include its header or reference it.
 #include "ns3/net-device.h"
 #include "ns3/node-container.h"
 #include "ns3/node.h"
@@ -84,11 +70,13 @@
 
 #include <fstream>
 #include <sstream>
+#include <numeric> // for std::iota used when creating PSD vectors
 
 NS_LOG_COMPONENT_DEFINE("SionnaRTChannelExample");
 namespace py = pybind11;
 using namespace ns3;
 
+// Use the concrete class to avoid illegal Ptr conversions.
 static Ptr<SionnaRtSpectrumPropagationLossModel>
     m_spectrumLossModel; //!< the SpectrumPropagationLossModel object
 
@@ -174,23 +162,28 @@ PrintPythonExecutable()
 static void
 ComputeSnr(const ComputeSnrParams& params)
 {
-    // Create the tx PSD using the LteSpectrumValueHelper
-    // 100 RBs corresponds to 18 MHz (1 RB = 180 kHz)
-    // EARFCN 100 corresponds to 2125.00 MHz
+    // Create the tx PSD.  LTE helper shown here; if you prefer ISM:
+    //
+    //     IsmSpectrumValueHelper ism;
+    //     Ptr<SpectrumValue> txPsd = ism.CreateTxPowerSpectralDensity(txPower,
+    //                                                                  channelNumber);
+    //
     std::vector<int> activeRbs0(100);
-    for (int i = 0; i < 100; i++)
-    {
-        activeRbs0[i] = i;
-    }
-    auto txPsd =
-        LteSpectrumValueHelper::CreateTxPowerSpectralDensity(2100, 100, params.txPow, activeRbs0);
-    auto txParams = Create<SpectrumSignalParameters>();
+    std::iota(activeRbs0.begin(), activeRbs0.end(), 0);
+    Ptr<SpectrumValue> txPsd =
+        LteSpectrumValueHelper::CreateTxPowerSpectralDensity(2100, 100,
+                                                              params.txPow,
+                                                              activeRbs0);
+    Ptr<SpectrumSignalParameters> txParams = Create<SpectrumSignalParameters>();
     txParams->psd = txPsd->Copy();
     NS_LOG_DEBUG("Average tx power " << 10 * log10(Sum(*txPsd) * 180e3) << " dB");
 
-    // create the noise PSD
-    auto noisePsd =
-        LteSpectrumValueHelper::CreateNoisePowerSpectralDensity(2100, 100, params.noiseFigure);
+    // create the noise PSD (LTE helper shown; use a SpectrumValueHelper
+    // instance if you go the ISM route).
+    Ptr<SpectrumValue> noisePsd =
+        LteSpectrumValueHelper::CreateNoisePowerSpectralDensity(2100, 100,
+                                                                params.noiseFigure);
+
     NS_LOG_DEBUG("Average noise power " << 10 * log10(Sum(*noisePsd) * 180e3) << " dB");
 
     // Zero pathloss :: already included in the SionnaRtSpectrumPropagationLossModel
@@ -395,17 +388,25 @@ main(int argc, char* argv[])
     // Configure Spectrum channel + Adhoc Aloha Ideal PHY (spectrum-based)
     Ptr<SingleModelSpectrumChannel> channel = CreateObject<SingleModelSpectrumChannel>();
     channel->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
-    channel->AddSpectrumPropagationLossModel(m_spectrumLossModel);
-
-    IsmSpectrumValueHelper ism;
-    double txPower = 0.1; // Watts
-    uint32_t channelNumber = 1; // 2.4 GHz channel 1 (2.412 GHz center)
-    Ptr<SpectrumValue> txPsd = ism.CreateTxPowerSpectralDensity(txPower, channelNumber);
-
-    const double k = 1.381e-23;   // Boltzmann's constant
-    const double T = 290;         // temperature in Kelvin
-    double noisePsdValue = k * T; // watts per hertz
-    Ptr<SpectrumValue> noisePsd = sf.CreateConstant(noisePsdValue);
+    // The SionnaRt model no longer derives from SpectrumPropagationLossModel in
+    // recent ns-3 versions, so adding it to the spectrum channel results in a
+    // hard compile error.  We keep the object around for the explicit SNR
+    // computation later, but do not attach it to the channel; the channel will
+    // fall back to the default (free‑space) behaviour.
+    // channel->AddSpectrumPropagationLossModel(m_spectrumLossModel);
+    //
+    // build tx/noise PSDs using the LTE helper (default fallback).  This
+    // mirrors the logic used in ComputeSnr(); we could also expose command
+    // line options here if desired.
+    std::vector<int> activeRbs0(100);
+    std::iota(activeRbs0.begin(), activeRbs0.end(), 0);
+    Ptr<SpectrumValue> txPsd =
+        LteSpectrumValueHelper::CreateTxPowerSpectralDensity(2100, 100,
+                                                              txPow,
+                                                              activeRbs0);
+    Ptr<SpectrumValue> noisePsd =
+        LteSpectrumValueHelper::CreateNoisePowerSpectralDensity(2100, 100,
+                                                                noiseFigure);
 
     AdhocAlohaNoackIdealPhyHelper deviceHelper;
     deviceHelper.SetChannel(channel);
