@@ -210,6 +210,18 @@ ComputeSnr(const ComputeSnrParams& params)
     f.close();
 }
 
+static void
+LogSimTime()
+{
+    double t = Simulator::Now().GetSeconds();
+    NS_LOG_INFO("SimTime: " << t << " s");
+    std::ofstream lf;
+    lf.open("simtime-trace.txt", std::ios::out | std::ios::app);
+    lf << t << std::endl;
+    lf.close();
+    Simulator::Schedule(Seconds(5), &LogSimTime);
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -533,6 +545,9 @@ main(int argc, char* argv[])
         ComputeSnrParams params{txMob, rxMob, txPow, noiseFigure, txAntenna, rxAntenna};
         Simulator::Schedule(MilliSeconds(timeRes * i), &ComputeSnr, params);
     }
+
+    // start periodic simulator-time logging (every 5 seconds)
+    Simulator::Schedule(Seconds(5), &LogSimTime);
 
     Simulator::Run();
     Simulator::Destroy();
