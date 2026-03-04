@@ -74,7 +74,25 @@ def animate_connectivity(mob_frames, conn_frames, interval=200, save=None):
     ani = animation.FuncAnimation(fig, update, frames=nframes,
                                   init_func=init, blit=False, interval=interval)
     if save:
-        ani.save(save, dpi=150)
+        ext = save.split('.')[-1].lower()
+        try:
+            if ext in ('mp4', 'avi'):
+                # try ffmpeg writer
+                if 'ffmpeg' in animation.writers.list():
+                    writer = animation.FFMpegWriter(fps=1000/interval)
+                    ani.save(save, writer=writer, dpi=150)
+                else:
+                    raise RuntimeError('ffmpeg writer not available, please install ffmpeg or choose .gif output')
+            elif ext in ('gif',):
+                # Pillow can write gif
+                ani.save(save, writer='pillow', dpi=150)
+            else:
+                # let matplotlib guess
+                ani.save(save, dpi=150)
+        except Exception as e:
+            print(f"Error saving animation: {e}")
+            print("Attempting to display instead...")
+            plt.show()
     else:
         plt.show()
 
@@ -82,8 +100,8 @@ def animate_connectivity(mob_frames, conn_frames, interval=200, save=None):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Plot mobility and connectivity animation')
-    parser.add_argument('--mob', default='../scratch/mobility-rt.csv', help='mobility csv file')
-    parser.add_argument('--conn', default='../scratch/connectivityM-rt.csv', help='connectivity csv file')
+    parser.add_argument('--mob', default='mobility-rt.csv', help='mobility csv file')
+    parser.add_argument('--conn', default='connectivityM-rt.csv', help='connectivity csv file')
     parser.add_argument('--interval', type=int, default=200, help='frame interval in ms')
     parser.add_argument('--save', help='output animation file (mp4 or gif)')
     args = parser.parse_args()
