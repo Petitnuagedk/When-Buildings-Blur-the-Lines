@@ -96,6 +96,18 @@ struct ComputeSnrParams
     Ptr<PhasedArrayModel> rxAntenna; //!< the rx antenna array
 };
 
+static void
+LogSimTime()
+{
+    double t = Simulator::Now().GetSeconds();
+    NS_LOG_INFO("SimTime: " << t << " s");
+    std::ofstream lf;
+    lf.open("simtime-trace.txt", std::ios::out | std::ios::app);
+    lf << t << std::endl;
+    lf.close();
+    Simulator::Schedule(Seconds(5), &LogSimTime);
+}
+
 /**
  * Perform the beamforming using the DFT beamforming method
  * @param thisDevice the device performing the beamforming
@@ -160,7 +172,7 @@ PrintPythonExecutable()
  * ComputeSnr
  */
 static void
-ComputeSnr(const ComputeSnrParams& params)
+ComputeSnr(ComputeSnrParams params)
 {
     // Create the tx PSD.  LTE helper shown here; if you prefer ISM:
     //
@@ -208,18 +220,6 @@ ComputeSnr(const ComputeSnrParams& params)
     f << Simulator::Now().GetSeconds() << " " << 10 * log10(Sum(*rxPsd) / Sum(*noisePsd))
       << std::endl;
     f.close();
-}
-
-static void
-LogSimTime()
-{
-    double t = Simulator::Now().GetSeconds();
-    NS_LOG_INFO("SimTime: " << t << " s");
-    std::ofstream lf;
-    lf.open("simtime-trace.txt", std::ios::out | std::ios::app);
-    lf << t << std::endl;
-    lf.close();
-    Simulator::Schedule(Seconds(5), &LogSimTime);
 }
 
 int
@@ -546,9 +546,8 @@ main(int argc, char* argv[])
         Simulator::Schedule(MilliSeconds(timeRes * i), &ComputeSnr, params);
     }
 
-    // start periodic simulator-time logging (every 5 seconds)
     Simulator::Schedule(Seconds(5), &LogSimTime);
-
+    
     Simulator::Run();
     Simulator::Destroy();
     return 0;
