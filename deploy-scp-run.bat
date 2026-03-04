@@ -131,14 +131,4 @@ exit /b 0
 
 
 REM Example usage:
-REM deploy-scp-run.bat -LocalFile ".\scratch\sionna-rt-channel-example.cc" -Remote "ledirachh@10.108.140.148" -RemotePath "/home/ledirachh/j1/scratch/sionna-rt-channel-example.cc" -RunCommand "cd /home/ledirachh/j1; ./ns3 run scratch/sionna-rt-channel-example"
-
-deploy-scp-run.bat                           ← the helper script you are invoking
-    -LocalFile ".\scratch\sionna-rt-channel-example.cc"
-                                               ← path of the file on **your Windows PC**
-    -Remote "ledirachh@10.108.140.148"
-                                               ← SSH target in user@host form
-    -RemotePath "/home/ledirachh/j1/scratch/sionna-rt-channel-example.cc"
-                                               ← where to copy the file to on the Linux box
-    -RunCommand "cd /home/ledirachh/j1; ./ns3 run scratch/sionna-rt-channel-example"
-                                               ← shell command executed **after** the copy
+REM deploy-scp-run.bat -LocalFile ".\scratch\sionna-rt-custom.cc" -Remote "ledirachh@10.108.140.148" -RemotePath "/home/ledirachh/j1/scratch/sionna-rt-custom.cc" -RunCommand "cd /home/ledirachh/j1; ./ns3 run scratch/sionna-rt-custom.cc"

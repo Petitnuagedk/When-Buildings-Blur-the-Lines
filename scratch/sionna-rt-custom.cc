@@ -174,6 +174,14 @@ IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t interfac
 
     if (from->GetAddress(interface, 0).GetLocal() == source)
     {
+        // extract sequence number from SeqTsHeader if present
+        int16_t sequenceNumber = -1;
+        SeqTsHeader seqTsHeader;
+        if (packetCopy->PeekHeader(seqTsHeader)) {
+            packetCopy->RemoveHeader(seqTsHeader);
+            sequenceNumber = seqTsHeader.GetSeq();
+        }
+
         networkLevelTraffic.AppPacketsSent++;
         std::tuple<Ipv4Address, Ipv4Address, uint16_t> flowPrint = {source, destination, destinationPort};
         auto it = std::find_if(FlowInformationMap.begin(), FlowInformationMap.end(),
@@ -190,15 +198,17 @@ IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t interfac
             newFlow.TxPackets = 1;
             newFlow.FirstTxTime = Simulator::Now().GetSeconds();
             newFlow.LastTxTime = Simulator::Now().GetSeconds();
-            newFlow.seqNums.push_back(udpHeader.GetSeq());
+            if (sequenceNumber >= 0) {
+                newFlow.seqNums.push_back(sequenceNumber);
+            }
             FlowInformationMap[newFlow.FlowID] = newFlow;
         } else {
             FlowInformation& existingFlow = it->second;
-            uint64_t seq = udpHeader.GetSeq();
-            if (std::find(existingFlow.seqNums.begin(), existingFlow.seqNums.end(), seq) == existingFlow.seqNums.end()) {
+            if (sequenceNumber >= 0 &&
+                std::find(existingFlow.seqNums.begin(), existingFlow.seqNums.end(), sequenceNumber) == existingFlow.seqNums.end()) {
                 existingFlow.TxPackets++;
                 existingFlow.LastTxTime = Simulator::Now().GetSeconds();
-                existingFlow.seqNums.push_back(seq);
+                existingFlow.seqNums.push_back(sequenceNumber);
             }
         }
     }
@@ -476,7 +486,6 @@ main(int argc, char* argv[])
 {
     py::scoped_interpreter guard{}; // Python stays alive for whole program
 
-    LogComponentEnable("SionnaRTChannelExample", LOG_LEVEL_DEBUG);
     // to check the python executable and version
     PrintPythonExecutable();
 
@@ -486,6 +495,7 @@ main(int argc, char* argv[])
     double distance = 50.0;   // distance between tx and rx nodes in meters
     uint32_t simTime = 2000;  // simulation time in milliseconds 30 sec = 30000 ms
     uint32_t timeRes = 10;    // time resolution in milliseconds
+    bool verbose = false;    // enable verbose logging
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
     std::string SceneFile = "scratch/scene_wifi24.xml"; // Mitsuba scene XML file (relative or absolute path)
@@ -568,6 +578,11 @@ main(int argc, char* argv[])
     cmd.AddValue("seed", "Random seed", RtPathSolverConfig.seed);
 
     cmd.Parse(argc, argv);
+
+    if (verbose)
+    {
+        LogComponentEnable("SionnaRTChannelExample", LOG_LEVEL_DEBUG);
+    }
 
     // set the channel update period used by the Sionna RT channel model
     Config::SetDefault("ns3::SionnaRtChannelModel::UpdatePeriod",
@@ -806,7 +821,7 @@ main(int argc, char* argv[])
     }
 
     Simulator::Schedule(Seconds(5), &LogSimTime);
-
+    Simulator::Stop(Seconds(simTime + 2000));
     Simulator::Run();
 
     // write collected traffic metrics after simulation finishes
