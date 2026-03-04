@@ -226,8 +226,8 @@ main(int argc, char* argv[])
     uint32_t timeRes = 10;    // time resolution in milliseconds
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
-    std::string SceneFile = "scene_wifi24.xml"; // Mitsuba scene XML file (relative or absolute path)
-    std::string LayoutFile = "UrbanCompLayout.csv"; // CSV with node positions
+    std::string SceneFile = "scratch/scene_wifi24.xml"; // Mitsuba scene XML file (relative or absolute path)
+    std::string LayoutFile = "scratch/UrbanCompLayout.csv"; // CSV with node positions
     int numSource = 6; // default number of source nodes for traffic
     std::string routing = "olsr"; // routing protocol: olsr or aodv
 
