@@ -12,10 +12,13 @@
 #include "ns3/aodv-module.h"
 #include "ns3/olsr-helper.h"
 #include "ns3/applications-module.h"
+#include "ns3/wifi-module.h"  // needed for WifiHelper
+#include "ns3/spectrum-wifi-phy.h"  // SpectrumWifiPhyHelper
 #include "ns3/adhoc-aloha-noack-ideal-phy-helper.h"
 #include "ns3/propagation-delay-model.h"
 #include "ns3/spectrum-helper.h"
 #include "ns3/single-model-spectrum-channel.h"
+#include "ns3/multi-model-spectrum-channel.h"
 #include "ns3/net-device.h"
 #include "ns3/node-container.h"
 #include "ns3/node.h"
@@ -34,6 +37,7 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
+#include <filesystem>
 
 using namespace ns3;
 namespace py = pybind11;
@@ -50,6 +54,9 @@ static Ipv4InterfaceContainer g_ifaces;
 static std::vector<std::vector<uint32_t>> receivedProbes;
 static std::vector<std::vector<std::vector<uint32_t>>> timeReceivedProbes;
 static std::vector<std::vector<std::tuple<double,double,double>>> nodePositions;
+
+// verbosity control for probe logging
+static bool g_probeVerbose = false;  // set in main from command-line
 
 // additional globals for sionna metrics may be defined later
 
@@ -250,23 +257,28 @@ IpPacketDropCallback(const Ipv4Header &header, Ptr< const Packet > packet, Ipv4L
     UdpHeader udpHeader;
 
     packetCopy->RemoveHeader(ipv4Header);
-    if (!packetCopy->PeekHeader(udpHeader)) {
-        return;
+    bool hasUdp = packetCopy->PeekHeader(udpHeader);
+    if (hasUdp) {
+        packetCopy->RemoveHeader(udpHeader);
     }
-    packetCopy->RemoveHeader(udpHeader);
-    uint16_t destinationPort = udpHeader.GetDestinationPort();
-    if (destinationPort != 4000) {
-        return;
-    }
-    switch (reason) {
-        case Ipv4L3Protocol::DROP_NO_ROUTE:
-            nodeleveltrafficMap[ipv4->GetObject<Node>()->GetId()].PacketsDroppedNoRoute++;
-            break;
-        case Ipv4L3Protocol::DROP_ROUTE_ERROR:
-            nodeleveltrafficMap[ipv4->GetObject<Node>()->GetId()].PacketsDroppedRerr++;
-            break;
-        default:
-            break;
+    uint16_t destinationPort = hasUdp ? udpHeader.GetDestinationPort() : 0;
+
+    NS_LOG_INFO("IP drop reason=" << reason
+                << " dst=" << ipv4Header.GetDestination()
+                << " port=" << destinationPort);
+
+    // still keep existing accounting for our main app port 4000
+    if (destinationPort == 4000) {
+        switch (reason) {
+            case Ipv4L3Protocol::DROP_NO_ROUTE:
+                nodeleveltrafficMap[ipv4->GetObject<Node>()->GetId()].PacketsDroppedNoRoute++;
+                break;
+            case Ipv4L3Protocol::DROP_ROUTE_ERROR:
+                nodeleveltrafficMap[ipv4->GetObject<Node>()->GetId()].PacketsDroppedRerr++;
+                break;
+            default:
+                break;
+        }
     }
 }
 
@@ -468,11 +480,16 @@ ReceiveProbe(Ptr<Socket> socket)
     Address from;
     while ((pkt = socket->RecvFrom(from))) {
         Ipv4Address addr = InetSocketAddress::ConvertFrom(from).GetIpv4();
+        if (g_probeVerbose) NS_LOG_INFO("Probe received from " << addr);
         for (uint32_t i = 0; i < g_ifaces.GetN(); ++i) {
             if (g_ifaces.GetAddress(i) == addr) {
                 Ptr<Node> recv = socket->GetNode();
                 uint32_t rid = recv->GetId();
-                receivedProbes[i][rid] = 1;
+                if (rid < receivedProbes.size()) {
+                    receivedProbes[i][rid] = 1;
+                } else {
+                    NS_LOG_WARN("Receiver id " << rid << " out of range");
+                }
                 break;
             }
         }
@@ -483,23 +500,48 @@ void
 SendProbes(Ptr<Node> sender, Ipv4InterfaceContainer ifaces)
 {
     uint32_t sid = sender->GetId();
-    if (sid == 0) {
-        timeReceivedProbes.push_back(receivedProbes);
-    }
-    for (auto &row : receivedProbes) std::fill(row.begin(), row.end(), 0);
+    if (g_probeVerbose) NS_LOG_INFO("Sending probe from node " << sid << " at time " << Simulator::Now().GetSeconds());
+    Ptr<Ipv4> ipv4 = sender->GetObject<Ipv4>();
     for (uint32_t j = 0; j < ifaces.GetN(); ++j) {
         if (j == sid) continue;
+        Ipv4Address dst = ifaces.GetAddress(j);
+        NS_LOG_DEBUG("  dest[" << j << "]=" << dst);
+        // check routing table for this destination
+        Ipv4Header iph;
+        iph.SetDestination(dst);
+        Ptr<Packet> dummy = Create<Packet>();
+        Ptr<NetDevice> outDev = nullptr;
+        Socket::SocketErrno sockerr;
+        Ptr<Ipv4Route> rt = ipv4->GetRoutingProtocol()->RouteOutput(dummy, iph, outDev, sockerr);
+        // log only when no route is available
+        if (!rt) {
+            NS_LOG_INFO("    no route to " << dst);
+        }
         Ptr<Socket> sock = Socket::CreateSocket(sender, UdpSocketFactory::GetTypeId());
-        InetSocketAddress dest(ifaces.GetAddress(j), 9999);
+        InetSocketAddress dest(dst, 9999);
         sock->Connect(dest);
         Ptr<Packet> p = Create<Packet>((uint8_t*)&sid, sizeof(sid));
-        sock->Send(p);
+        int64_t bytes = sock->Send(p);
+        NS_LOG_DEBUG("  sent " << bytes << " bytes to " << dst << " from node " << sid);
+        if (bytes <= 0) {
+            NS_LOG_WARN("  send failed (" << bytes << ")");
+        }
         sock->Close();
     }
     if (Simulator::Now().GetSeconds() + 1.0 < g_simStopTime) {
         Simulator::Schedule(Seconds(1.0), &SendProbes, sender, ifaces);
     }
 }
+
+void
+SampleConnectivity()
+{
+    timeReceivedProbes.push_back(receivedProbes);
+    for (auto &row : receivedProbes)
+        std::fill(row.begin(), row.end(), 0);
+    Simulator::Schedule(Seconds(1.0), &SampleConnectivity);
+}
+
 
 int
 main(int argc, char* argv[])
@@ -517,23 +559,26 @@ main(int argc, char* argv[])
     double endTime = 30.0;  // simulation time in seconds
     double timeRes = 0.01;    // time resolution in seconds
     bool verbose = true;    // enable verbose logging
+    bool probeVerbose = false; // print probe send/receive messages (will be copied to g_probeVerbose)
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
     std::string SceneFile = "scratch/scene_wifi24.xml"; // Mitsuba scene XML file (relative or absolute path)
     std::string LayoutFile = "scratch/UrbanCompLayout.csv"; // CSV with node positions
-    int numSource = 6; // default number of source nodes for traffic
+    int numSource = 1; // default number of source nodes for traffic
     std::string routing = "olsr"; // routing protocol: olsr or aodv
+    int maxNodes = 10; // override number of nodes created (<=0 = use all positions)
 
     bool enableGnbIso = false;          // enable isotropic elements at gNB
     bool enableUeIso = false;           // enable isotropic elements at UE
     bool enableGnbDualPolarized = true; // enable dual-polarized elements at gNB
     bool enableUeDualPolarized = true;  // enable dual-polarized elements at UE
 
-    bool IsImageRenderedEnabled = false;               // enable rendering of scene images to file
+    bool IsImageRenderedEnabled = true;               // enable rendering of scene images to file
     Vector CameraPosition(Vector(70.0, -20.0, 190.0)); // Camera position
     Vector CameraLookAt(Vector(0.0, 0.0, 4.0));        // Camera look-at point
     std::string filename = "sionna-rt-scene3-";        // output file name for scene images
     std::string filedirectory = "sionna-rt-images2";   // output file directory for scene images
+
 
     // Sionna RT path solver configuration defaults
     SionnaRtChannelModel::RtPathSolverConfig RtPathSolverConfig;
@@ -572,6 +617,7 @@ main(int argc, char* argv[])
     cmd.AddValue("layoutFile", "Path to node layout CSV file", LayoutFile);
     cmd.AddValue("numSource", "Number of source nodes to create traffic", numSource);
     cmd.AddValue("routing", "Routing protocol: olsr or aodv", routing);
+    cmd.AddValue("maxNodes", "Maximum number of nodes to create (<=0 = all)", maxNodes);
 
     cmd.AddValue("txPow", "Tx power in dBm", txPow);
     cmd.AddValue("noiseFigure", "Noise figure in dB", noiseFigure);
@@ -580,6 +626,7 @@ main(int argc, char* argv[])
     cmd.AddValue("startTime", "Simulation start time in seconds", startTime);
     cmd.AddValue("endTime", "Simulation end time in seconds", endTime);
     cmd.AddValue("timeRes", "Time resolution in seconds", timeRes);
+    cmd.AddValue("probeVerbose", "Enable detailed probe send/receive logging", probeVerbose);
 
     cmd.AddValue("maxDepth", "Maximum reflection/refraction depth", RtPathSolverConfig.maxDepth);
     cmd.AddValue("los", "Include line-of-sight path", RtPathSolverConfig.los);
@@ -601,10 +648,28 @@ main(int argc, char* argv[])
 
     cmd.Parse(argc, argv);
 
+    // after parsing, verify scene file / output directory (user may have overridden defaults)
+    bool haveSceneFile = !SceneFile.empty() && std::filesystem::exists(SceneFile);
+    if (!haveSceneFile) {
+        if (!SceneFile.empty()) {
+            std::cerr << "Warning: scene file '" << SceneFile << "' not found, disabling image rendering.\n";
+        }
+        IsImageRenderedEnabled = false;
+    }
+    if (!std::filesystem::exists(filedirectory)) {
+        std::cerr << "Output directory '" << filedirectory << "' does not exist, creating it.\n";
+        std::error_code ec;
+        if (!std::filesystem::create_directories(filedirectory, ec)) {
+            std::cerr << "Failed to create output directory: " << ec.message() << "\n";
+        }
+    }
+
     if (verbose)
     {
         LogComponentEnable("SionnaRTConnectExample", LOG_LEVEL_INFO);
     }
+    // copy CLI value into global
+    g_probeVerbose = probeVerbose;
 
     // set the channel update period used by the Sionna RT channel model
     Config::SetDefault("ns3::SionnaRtChannelModel::UpdatePeriod",
@@ -617,13 +682,11 @@ main(int argc, char* argv[])
     m_spectrumLossModel = CreateObject<SionnaRtSpectrumPropagationLossModel>();
     m_spectrumLossModel->SetChannelModelAttribute("Frequency", DoubleValue(frequency));
     // If a Mitsuba scene XML file is provided, pass it to the channel model
-    m_spectrumLossModel->SetChannelModelAttribute(
-        "SceneFile",
-        StringValue(SceneFile));
-    // Also set the Scenario attribute for backward compatibility
-    m_spectrumLossModel->SetChannelModelAttribute(
-        "Scenario",
-        StringValue(Scenario));
+    if (haveSceneFile) {
+        m_spectrumLossModel->SetChannelModelAttribute("SceneFile", StringValue(SceneFile));
+    } else {
+        m_spectrumLossModel->SetChannelModelAttribute("Scenario", StringValue(Scenario));
+    }
 
     // enable image rendering and set output filenames/paths if desired
     m_spectrumLossModel->SetChannelModelAttribute(
@@ -680,12 +743,18 @@ main(int argc, char* argv[])
             }
         }
     }
+    // apply node limit if requested
+    if (maxNodes > 0 && static_cast<int>(positions.size()) > maxNodes) {
+        positions.resize(maxNodes);
+        NS_LOG_INFO("Truncated layout to " << maxNodes << " nodes");
+    }
 
     NodeContainer nodes;
     nodes.Create(positions.size());
 
-    // Configure Spectrum channel + Adhoc Aloha Ideal PHY (spectrum-based)
-    Ptr<SingleModelSpectrumChannel> channel = CreateObject<SingleModelSpectrumChannel>();
+    // Configure a spectrum channel that supports multiple spectrum models
+    // (needed by SpectrumWifiPhy which uses its own Wi-Fi spectrum model).
+    Ptr<MultiModelSpectrumChannel> channel = CreateObject<MultiModelSpectrumChannel>();
     channel->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
     // The SionnaRt model no longer derives from SpectrumPropagationLossModel in
     // recent ns-3 versions, so adding it to the spectrum channel results in a
@@ -707,12 +776,14 @@ main(int argc, char* argv[])
         LteSpectrumValueHelper::CreateNoisePowerSpectralDensity(2100, 100,
                                                                 noiseFigure);
 
-    AdhocAlohaNoackIdealPhyHelper deviceHelper;
-    deviceHelper.SetChannel(channel);
-    deviceHelper.SetTxPowerSpectralDensity(txPsd);
-    deviceHelper.SetNoisePowerSpectralDensity(noisePsd);
-    deviceHelper.SetPhyAttribute("Rate", DataRateValue(DataRate("1Mbps")));
-    NetDeviceContainer devices = deviceHelper.Install(nodes);
+    // Use Spectrum‑based Wi‑Fi PHY so the underlying channel is a SpectrumChannel
+    SpectrumWifiPhyHelper wifiPhy; // = SpectrumWifiPhyHelper::Default();
+    wifiPhy.SetChannel(channel);
+    WifiHelper wifi;
+    wifi.SetStandard(WIFI_STANDARD_80211g);
+    WifiMacHelper wifiMac;
+    wifiMac.SetType("ns3::AdhocWifiMac");
+    NetDeviceContainer devices = wifi.Install(wifiPhy, wifiMac, nodes);
 
     // Install Internet stack with selected routing
     InternetStackHelper stack;
@@ -746,21 +817,33 @@ main(int argc, char* argv[])
     address.SetBase("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
+
     // --- connectivity addition ---
     g_ifaces = interfaces;
     receivedProbes.assign(nodes.GetN(), std::vector<uint32_t>(nodes.GetN(), 0));
     timeReceivedProbes.clear();
     nodePositions.clear();
-    Simulator::Schedule(Seconds(2.0), &SchedulePositionRecording, nodes);
+    // start recording positions slightly after application start
+    Simulator::Schedule(Seconds(startTime + 0.5), &SchedulePositionRecording, nodes);
     for (uint32_t i = 0; i < nodes.GetN(); ++i) {
         Ptr<Node> n = nodes.Get(i);
         Ptr<Socket> sock = Socket::CreateSocket(n, UdpSocketFactory::GetTypeId());
         sock->Bind(InetSocketAddress(Ipv4Address::GetAny(), 9999));
         sock->SetRecvCallback(MakeCallback(&ReceiveProbe));
     }
+    double probeStart = startTime + 1.0; // wait a bit for routes
+    NS_LOG_INFO("Scheduling probe rounds beginning at " << probeStart << " s");
+    const double spacing = 0.005; // seconds between probe sends to reduce collisions
     for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-        Simulator::Schedule(Seconds(2.0), &SendProbes, nodes.Get(i), interfaces);
+        double when = probeStart + i * spacing;
+        Simulator::Schedule(Seconds(when), &SendProbes, nodes.Get(i), interfaces);
     }
+    // start sampling at the same time as mobility recordings (after apps begin)
+    Simulator::Schedule(Seconds(startTime + 0.5), &SampleConnectivity);
+    // earlier we scheduled at probeStart + ... but that delayed the first
+    // sample and produced one fewer frame than mobility.  Starting now matches
+    // the mobility frame count; early samples will simply be zeros until probes
+    // actually flow.
 
     // --- attach IP layer tracing for metrics ---
     for (uint32_t i = 0; i < nodes.GetN(); ++i) {
@@ -875,7 +958,15 @@ main(int argc, char* argv[])
         }
     }
 
-    Simulator::Run();
+    try {
+        Simulator::Run();
+    }
+    catch (const py::error_already_set &e) {
+        std::cerr << "Python exception during simulation: "
+                  << e.what() << std::endl;
+        Simulator::Destroy();
+        return 1;
+    }
 
     // write collected traffic metrics after simulation finishes
     WriteAllMetricsToCsv();

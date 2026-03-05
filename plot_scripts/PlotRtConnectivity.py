@@ -45,8 +45,8 @@ def animate_connectivity(mob_frames, conn_frames, interval=200, save=None):
     lines = []
 
     def init():
-        ax.set_xlim(np.nanmin(mob_frames[0][:,0]) - 5, np.nanmax(mob_frames[0][:,0]) + 5)
-        ax.set_ylim(np.nanmin(mob_frames[0][:,1]) - 5, np.nanmax(mob_frames[0][:,1]) + 5)
+        ax.set_xlim(-750, 750)
+        ax.set_ylim(-750, 750)
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_title('t=0.0 s')
@@ -108,6 +108,7 @@ if __name__ == '__main__':
 
     mob_frames = read_frames(args.mob)
     conn_frames = read_frames(args.conn)
+    print(f"Read {len(mob_frames)} mobility frames and {len(conn_frames)} connectivity frames")
     # connectivity file contains 0/1 entries; convert each frame to square matrix
     conn_mats = []
     for f in conn_frames:

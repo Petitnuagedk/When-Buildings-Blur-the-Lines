@@ -11,18 +11,13 @@
 
     <!-- ===================== MATERIALS ===================== -->
 
-    <!-- Concrete walls at 2.4 GHz -->
-    <bsdf type="twosided" id="mat-concrete">
-        <bsdf type="diffuse">
-            <rgb name="reflectance" value="0.44, 0.44, 0.44"/>
-        </bsdf>
+    <bsdf type="itu-radio-material" id="mat-concrete">
+        <string name="type" value="concrete"/>
     </bsdf>
 
-    <!-- Ground (dry concrete pavement / dry earth at 2.4 GHz) -->
-    <bsdf type="twosided" id="mat-ground">
-        <bsdf type="diffuse">
-            <rgb name="reflectance" value="0.20, 0.20, 0.20"/>
-        </bsdf>
+    <!-- Ground (dry earth) at 2.4 GHz — ITU-R P.2040-3 -->
+    <bsdf type="itu-radio-material" id="mat-ground">
+        <string name="type" value="concrete"/>
     </bsdf>
 
     <!-- ===================== GROUND PLANE ===================== -->
@@ -316,5 +311,22 @@
             scene.tx.position = [x, y, 5.0]
             scene.rx.position = [x, y, 5.0]
     -->
+
+    <sensor type="perspective" id="main_camera">
+        <float name="fov" value="45"/>
+        <transform name="to_world">
+            <lookat origin="70, -20, 190"
+                    target="0, 0, 4"
+                    up    ="0, 0, 1"/>
+        </transform>
+        <sampler type="independent">
+            <integer name="sample_count" value="32"/>
+        </sampler>
+        <film type="hdrfilm">
+            <integer name="width"  value="1920"/>
+            <integer name="height" value="1080"/>
+            <string  name="pixel_format" value="rgb"/>
+        </film>
+    </sensor>
 
 </scene>
