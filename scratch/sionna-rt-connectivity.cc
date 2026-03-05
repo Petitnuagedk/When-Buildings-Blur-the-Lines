@@ -14,6 +14,8 @@
 #include "ns3/applications-module.h"
 #include "ns3/wifi-module.h"  // needed for WifiHelper
 #include "ns3/spectrum-wifi-phy.h"  // SpectrumWifiPhyHelper
+#include "ns3/spectrum-propagation-loss-model.h"
+#include "ns3/phased-array-spectrum-propagation-loss-model.h"
 #include "ns3/adhoc-aloha-noack-ideal-phy-helper.h"
 #include "ns3/propagation-delay-model.h"
 #include "ns3/spectrum-helper.h"
@@ -41,6 +43,47 @@
 
 using namespace ns3;
 namespace py = pybind11;
+
+class SionnaSpectrumWrapper : public SpectrumPropagationLossModel
+{
+public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("SionnaSpectrumWrapper")
+            .SetParent<SpectrumPropagationLossModel>();
+        return tid;
+    }
+
+    void SetSionnaModel(Ptr<SionnaRtSpectrumPropagationLossModel> m) { m_sionna = m; }
+
+    Ptr<SpectrumValue> DoCalcRxPowerSpectralDensity(
+        Ptr<const SpectrumSignalParameters> params,
+        Ptr<const MobilityModel> tx,
+        Ptr<const MobilityModel> rx) const override
+    {
+        Ptr<UniformPlanarArray> txAnt =
+            CreateObjectWithAttributes<UniformPlanarArray>(
+                "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
+        Ptr<UniformPlanarArray> rxAnt =
+            CreateObjectWithAttributes<UniformPlanarArray>(
+                "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
+        PhasedArrayModel::ComplexVector w(1);
+        w[0] = std::complex<double>(1.0, 0.0);
+        txAnt->SetBeamformingVector(w);
+        rxAnt->SetBeamformingVector(w);
+        Ptr<SpectrumSignalParameters> mutableParams = params->Copy();
+        auto rxParams = m_sionna->CalcRxPowerSpectralDensity(
+            mutableParams, tx, rx, txAnt, rxAnt);
+        return rxParams->psd;
+    }
+
+    // Required: SpectrumPropagationLossModel has this as pure virtual.
+    // Sionna uses its own internal RNG seeding so stream assignment is a no-op.
+    int64_t DoAssignStreams(int64_t stream) override { return 0; }
+
+private:
+    Ptr<SionnaRtSpectrumPropagationLossModel> m_sionna;
+};
 
 // global guard against scheduling beyond stop time
 static double g_simStopTime = 0.0;
@@ -344,7 +387,7 @@ LogSimTime()
     lf.close();
     // schedule next invocation only if it won't exceed the configured stop time
     if (t + 5.0 < g_simStopTime) {
-        Simulator::Schedule(Seconds(5), &LogSimTime);
+        Simulator::Schedule(Seconds(0.1), &LogSimTime);
     }
 }
 
@@ -557,12 +600,12 @@ main(int argc, char* argv[])
     double distance = 50.0;   // distance between tx and rx nodes in meters
     double startTime = 2.0;     // simulation start time (for apps) in seconds
     double endTime = 30.0;  // simulation time in seconds
-    double timeRes = 0.01;    // time resolution in seconds
+    double timeRes = 0.1;    // time resolution in seconds
     bool verbose = true;    // enable verbose logging
     bool probeVerbose = false; // print probe send/receive messages (will be copied to g_probeVerbose)
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
-    std::string SceneFile = "scratch/scene_wifi24.xml"; // Mitsuba scene XML file (relative or absolute path)
+    std::string SceneFile = "scratch/layout.xml"; // Mitsuba scene XML file (relative or absolute path)
     std::string LayoutFile = "scratch/UrbanCompLayout.csv"; // CSV with node positions
     int numSource = 1; // default number of source nodes for traffic
     std::string routing = "olsr"; // routing protocol: olsr or aodv
@@ -652,15 +695,15 @@ main(int argc, char* argv[])
     bool haveSceneFile = !SceneFile.empty() && std::filesystem::exists(SceneFile);
     if (!haveSceneFile) {
         if (!SceneFile.empty()) {
-            std::cerr << "Warning: scene file '" << SceneFile << "' not found, disabling image rendering.\n";
+            std::cout << "Warning: scene file '" << SceneFile << "' not found, disabling image rendering.\n";
         }
         IsImageRenderedEnabled = false;
     }
     if (!std::filesystem::exists(filedirectory)) {
-        std::cerr << "Output directory '" << filedirectory << "' does not exist, creating it.\n";
+        std::cout << "Output directory '" << filedirectory << "' does not exist, creating it.\n";
         std::error_code ec;
         if (!std::filesystem::create_directories(filedirectory, ec)) {
-            std::cerr << "Failed to create output directory: " << ec.message() << "\n";
+            std::cout << "Failed to create output directory: " << ec.message() << "\n";
         }
     }
 
@@ -673,7 +716,7 @@ main(int argc, char* argv[])
 
     // set the channel update period used by the Sionna RT channel model
     Config::SetDefault("ns3::SionnaRtChannelModel::UpdatePeriod",
-                       TimeValue(MilliSeconds(5))); // update the channel at each iteration
+                       TimeValue(MilliSeconds(100))); // update the channel at each iteration
 
     RngSeedManager::SetSeed(RtPathSolverConfig.seed);
     RngSeedManager::SetRun(RtPathSolverConfig.seed);
@@ -685,6 +728,7 @@ main(int argc, char* argv[])
     if (haveSceneFile) {
         m_spectrumLossModel->SetChannelModelAttribute("SceneFile", StringValue(SceneFile));
     } else {
+        std::cout << "No valid scene file provided, Sionna RT will use pre made scenario '" << Scenario << "'.\n";
         m_spectrumLossModel->SetChannelModelAttribute("Scenario", StringValue(Scenario));
     }
 
@@ -761,20 +805,11 @@ main(int argc, char* argv[])
     // hard compile error.  We keep the object around for the explicit SNR
     // computation later, but do not attach it to the channel; the channel will
     // fall back to the default (free‑space) behaviour.
-    // channel->AddSpectrumPropagationLossModel(m_spectrumLossModel);
-    //
-    // build tx/noise PSDs using the LTE helper (default fallback).  This
-    // mirrors the logic used in ComputeSnr(); we could also expose command
-    // line options here if desired.
-    std::vector<int> activeRbs0(100);
-    std::iota(activeRbs0.begin(), activeRbs0.end(), 0);
-    Ptr<SpectrumValue> txPsd =
-        LteSpectrumValueHelper::CreateTxPowerSpectralDensity(2100, 100,
-                                                              txPow,
-                                                              activeRbs0);
-    Ptr<SpectrumValue> noisePsd =
-        LteSpectrumValueHelper::CreateNoisePowerSpectralDensity(2100, 100,
-                                                                noiseFigure);
+    Ptr<SionnaSpectrumWrapper> wrapper = CreateObject<SionnaSpectrumWrapper>();
+    wrapper->SetSionnaModel(m_spectrumLossModel);
+    channel->AddSpectrumPropagationLossModel(wrapper);
+    // channel->AddPhasedArraySpectrumPropagationLossModel(
+    //         DynamicCast<PhasedArraySpectrumPropagationLossModel>(m_spectrumLossModel));
 
     // Use Spectrum‑based Wi‑Fi PHY so the underlying channel is a SpectrumChannel
     SpectrumWifiPhyHelper wifiPhy; // = SpectrumWifiPhyHelper::Default();
@@ -943,7 +978,7 @@ main(int argc, char* argv[])
     // compute global stop time and install it
     g_simStopTime = endTime + 5.0;
     std::cout << "[info] simulation will stop at " << g_simStopTime << " seconds" << std::endl;
-    Simulator::Schedule(Seconds(5), &LogSimTime);
+    Simulator::Schedule(Seconds(1), &LogSimTime);
     Simulator::Stop(Seconds(g_simStopTime));
 
     // check SNR scheduling boundaries

@@ -333,41 +333,38 @@ py::object
 SionnaRtChannelModel::LoadScene(const py::module_ rt) const
 {
     NS_LOG_FUNCTION(this);
-    NS_LOG_INFO("Loading Sionna RT scene: " << m_sceneConfigs.sceneName << " mergeShapes="
-                                            << (m_sceneConfigs.mergeShapes ? "true" : "false")
-                                            << " file=" << m_sceneConfigs.sceneFile);
 
+    // Must be set before any Mitsuba/Sionna object is created.
+    // cuda_ad_rgb enables GPU-accelerated ray tracing on NVIDIA hardware.
+    // llvm_ad_rgb is the CPU fallback if CUDA is unavailable.
+    py::module_ mi = py::module_::import("mitsuba");
+    mi.attr("set_variant")("cuda_ad_mono_polarized");
+    NS_LOG_INFO("Mitsuba variant set to cuda_ad_mono_polarized");
+
+    NS_LOG_INFO("Loading Sionna RT scene: " << m_sceneConfigs.sceneName
+                << " mergeShapes=" << (m_sceneConfigs.mergeShapes ? "true" : "false")
+                << " file=" << m_sceneConfigs.sceneFile);
     try
     {
-        // If an external scene file is configured try to use a dedicated loader
+        py::object load_scene = rt.attr("load_scene");
+
         if (!m_sceneConfigs.sceneFile.empty())
         {
-            if (py::hasattr(rt, "load_scene_from_file"))
-            {
-                py::object loader = rt.attr("load_scene_from_file");
-                py::object scene = loader(m_sceneConfigs.sceneFile);
-                NS_LOG_DEBUG("Scene object loaded from file via load_scene_from_file");
-                return scene;
-            }
-            else if (py::hasattr(rt, "load_scene_file"))
-            {
-                py::object loader = rt.attr("load_scene_file");
-                py::object scene = loader(m_sceneConfigs.sceneFile);
-                NS_LOG_DEBUG("Scene object loaded from file via load_scene_file");
-                return scene;
-            }
-            else
-            {
-                NS_LOG_WARN("sionna.rt does not provide a file-based loader; falling back to built-in factories");
-            }
+            // Sionna 1.x unified API: load_scene accepts a file path directly.
+            NS_LOG_DEBUG("Loading scene from file: " << m_sceneConfigs.sceneFile);
+            py::object scene = load_scene(
+                m_sceneConfigs.sceneFile,
+                py::arg("merge_shapes") = m_sceneConfigs.mergeShapes);
+            NS_LOG_INFO("Scene loaded from file via load_scene");
+            return scene;
         }
 
-        // Default behaviour: use the named built-in scene factory
-        py::object load_scene = rt.attr("load_scene");
+        // Fallback: built-in named scene
         py::object scenes = rt.attr("scene");
         py::object munich = scenes.attr(m_sceneConfigs.sceneName.c_str());
-        py::object scene = load_scene(munich, py::arg("merge_shapes") = m_sceneConfigs.mergeShapes);
-        NS_LOG_DEBUG("Scene object loaded from Sionna RT (built-in factory)");
+        py::object scene = load_scene(munich,
+                           py::arg("merge_shapes") = m_sceneConfigs.mergeShapes);
+        NS_LOG_DEBUG("Scene loaded from Sionna RT built-in factory");
         return scene;
     }
     catch (const std::exception& e)
@@ -637,18 +634,33 @@ SionnaRtChannelModel::SceneRenderImageToFile(const py::module_ rt,
     {
         std::filesystem::create_directories(m_outputImageDirectory + "/");
     }
-
     py::object camera = rt.attr("Camera");
     py::object Mycamera = camera(
         py::arg("position") =
             py::make_tuple(m_cameraPosition.x, m_cameraPosition.y, m_cameraPosition.z),
         py::arg("look_at") = py::make_tuple(m_cameraLookAt.x, m_cameraLookAt.y, m_cameraLookAt.z));
+
+    // Check whether paths contains any valid segments before passing them
+    // to render_to_file. Inside pybind11, paths_to_segments() can return
+    // None when the TF graph yields an empty result, which causes an
+    // unpack crash in renderer.py.
+    py::object safe_paths = py::none();
+    try {
+        py::object paths_to_seg = py::module_::import("sionna.rt.renderer")
+                                      .attr("paths_to_segments");
+        py::object result = paths_to_seg(paths);
+        if (!result.is_none()) {
+            safe_paths = paths;
+        }
+    } catch (...) {
+        NS_LOG_WARN("paths_to_segments check failed, rendering without paths");
+    }
+
     py::object renderer = scene.attr("render_to_file");
-    py::object image =
-        renderer(py::arg("camera") = Mycamera,
-                 py::arg("filename") = m_outputImageDirectory + "/" + m_outputImageName +
-                                       std::to_string(count) + ".png",
-                 py::arg("paths") = paths);
+    renderer(py::arg("camera") = Mycamera,
+             py::arg("filename") = m_outputImageDirectory + "/" + m_outputImageName +
+                                   std::to_string(count) + ".png",
+             py::arg("paths") = safe_paths);
     NS_LOG_INFO("Scene image rendered");
     count += 1;
 }
