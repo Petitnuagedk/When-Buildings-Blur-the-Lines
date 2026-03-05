@@ -258,11 +258,13 @@ SionnaRtChannelModel::GetChannel(Ptr<const MobilityModel> aMob,
         // store or replace the channel matrix in the channel map
         m_channelMatrixMap[channelMatrixKey] = channelMatrix;
 
-        // each time a new channel is created, also compute the channel params
+        // each time a new channel is created, also compute the channel params.
+        // Use the same antenna-ID key as m_channelMatrixMap so both maps are
+        // always coherent: a mobility-triggered matrix refresh also refreshes
+        // the params atomically, preventing cluster-count mismatches in
+        // CalcBeamformingGain when one map is stale and the other is not.
         auto channelParams = CalculateChannelParamsFromPaths(paths, aMob, bMob);
-        uint64_t channelParamsKey =
-            GetKey(aMob->GetObject<Node>()->GetId(), bMob->GetObject<Node>()->GetId());
-        m_channelParamsMap[channelParamsKey] = channelParams;
+        m_channelParamsMap[channelMatrixKey] = channelParams;
     }
 
     return channelMatrix;
@@ -452,21 +454,13 @@ Ptr<const MatrixBasedChannelModel::ChannelParams>
 SionnaRtChannelModel::GetParams(Ptr<const MobilityModel> aMob, Ptr<const MobilityModel> bMob) const
 {
     NS_LOG_FUNCTION(this);
-
-    // Compute the channel key. The key is reciprocal, i.e., key (a, b) = key (b, a)
-    uint64_t channelParamsKey =
-        GetKey(aMob->GetObject<Node>()->GetId(), bMob->GetObject<Node>()->GetId());
-
-    if (m_channelParamsMap.find(channelParamsKey) != m_channelParamsMap.end())
-    {
-        return m_channelParamsMap.find(channelParamsKey)->second;
-    }
-    else
-    {
-        NS_LOG_WARN("Channel params map not found. Returning a nullptr.");
-        return nullptr;
-    }
-
+    // m_channelParamsMap is now keyed by antenna ID pair (same as
+    // m_channelMatrixMap) to guarantee coherency on mobility-triggered
+    // updates.  This node-mobility-based lookup is therefore no longer
+    // valid.  The loss model should call GetParamsByAntennaKey() instead,
+    // passing GetKey(aPhasedArrayModel->GetId(), bPhasedArrayModel->GetId()).
+    NS_LOG_WARN("GetParams(mob, mob) called but params are keyed by antenna ID. "
+                "Use GetParamsByAntennaKey(antennaKey) instead. Returning nullptr.");
     return nullptr;
 }
 
@@ -798,6 +792,20 @@ SionnaRtChannelModel::CalculateAnglesromPaths(const py::module_ np,
     NS_LOG_DEBUG("Extracted " << angleVector.size() << " values for angle type " << Angle);
 
     return angleVector;
+}
+
+Ptr<const MatrixBasedChannelModel::ChannelParams>
+SionnaRtChannelModel::GetParamsByAntennaKey(uint64_t antennaKey) const
+{
+    NS_LOG_FUNCTION(this);
+    auto it = m_channelParamsMap.find(antennaKey);
+    if (it != m_channelParamsMap.end())
+    {
+        return it->second;
+    }
+    NS_LOG_WARN("Channel params not found for antenna key " << antennaKey
+                << ". Channel may not have been computed yet for this pair.");
+    return nullptr;
 }
 
 } // namespace ns3

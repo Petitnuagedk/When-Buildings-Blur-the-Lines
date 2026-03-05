@@ -300,6 +300,8 @@ class SionnaRtChannelModel : public MatrixBasedChannelModel
      */
     Ptr<const ChannelParams> GetParams(Ptr<const MobilityModel> aMob,
                                        Ptr<const MobilityModel> bMob) const override;
+    
+    Ptr<const ChannelParams> GetParamsByAntennaKey(uint64_t antennaKey) const;
 
     /**
      * @brief Assign stream indices to any random variables used internally.

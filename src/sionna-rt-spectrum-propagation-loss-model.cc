@@ -479,8 +479,25 @@ SionnaRtSpectrumPropagationLossModel::DoCalcRxPowerSpectralDensity(
 
     Ptr<const MatrixBasedChannelModel::ChannelMatrix> channelMatrix =
         m_channelModel->GetChannel(a, b, aPhasedArrayModel, bPhasedArrayModel);
-    Ptr<const MatrixBasedChannelModel::ChannelParams> channelParams =
-        m_channelModel->GetParams(a, b);
+    
+    //    Ptr<const MatrixBasedChannelModel::ChannelParams> channelParams =
+    //     m_channelModel->GetParams(a, b);
+
+    // Downcast to access GetParamsByAntennaKey — m_channelModel is stored as
+    // MatrixBasedChannelModel but is always a SionnaRtChannelModel instance.
+    uint64_t antennaParamsKey =
+        MatrixBasedChannelModel::GetKey(aPhasedArrayModel->GetId(), bPhasedArrayModel->GetId());
+    Ptr<const MatrixBasedChannelModel::ChannelParams> channelParams = nullptr;
+    Ptr<SionnaRtChannelModel> sionnaModel =
+        DynamicCast<SionnaRtChannelModel>(m_channelModel);
+    if (sionnaModel)
+    {
+        channelParams = sionnaModel->GetParamsByAntennaKey(antennaParamsKey);
+    }
+    else
+    {
+        NS_LOG_WARN("Could not downcast channel model to SionnaRtChannelModel");
+    }
 
     // retrieve the long term component
     Ptr<const MatrixBasedChannelModel::Complex3DVector> longTerm =

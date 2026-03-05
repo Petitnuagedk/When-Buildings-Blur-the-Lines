@@ -47,6 +47,10 @@ namespace py = pybind11;
 class SionnaSpectrumWrapper : public SpectrumPropagationLossModel
 {
 public:
+    using AntennaPair = std::pair<Ptr<UniformPlanarArray>, Ptr<UniformPlanarArray>>;
+    using CacheKey    = std::pair<const MobilityModel*, const MobilityModel*>;
+    using AntennaMap  = std::map<CacheKey, AntennaPair>;
+
     static TypeId GetTypeId()
     {
         static TypeId tid = TypeId("SionnaSpectrumWrapper")
@@ -54,35 +58,70 @@ public:
         return tid;
     }
 
-    void SetSionnaModel(Ptr<SionnaRtSpectrumPropagationLossModel> m) { m_sionna = m; }
+    void SetSionnaModel(Ptr<SionnaRtSpectrumPropagationLossModel> m)
+    {
+        m_sionna = m;
+    }
+
+    // Pre-allocate a stable antenna pair for a directed link before simulation
+    // starts.  Calling this for every (i,j) pair ensures that the first packet
+    // event reuses the pre-allocated objects rather than allocating new ones,
+    // so SionnaRtChannelModel's m_channelMatrixMap keyed on antenna IDs gets
+    // hits on every subsequent call within the UpdatePeriod window.
+    void PreRegisterLink(Ptr<const MobilityModel> tx,
+                         Ptr<const MobilityModel> rx,
+                         Ptr<UniformPlanarArray>   txAnt,
+                         Ptr<UniformPlanarArray>   rxAnt)
+    {
+        m_antennaCache[MakeKey(tx, rx)] = {txAnt, rxAnt};
+    }
+
+    const AntennaMap& GetAntennaCache() const { return m_antennaCache; }
 
     Ptr<SpectrumValue> DoCalcRxPowerSpectralDensity(
         Ptr<const SpectrumSignalParameters> params,
         Ptr<const MobilityModel> tx,
         Ptr<const MobilityModel> rx) const override
     {
-        Ptr<UniformPlanarArray> txAnt =
-            CreateObjectWithAttributes<UniformPlanarArray>(
+        auto key = MakeKey(tx, rx);
+
+        // Lazily allocate if PreRegisterLink was not called for this pair
+        // (e.g. a node added dynamically).  Same-object reuse is what makes
+        // SionnaRtChannelModel's antenna-ID-keyed cache work correctly.
+        if (m_antennaCache.find(key) == m_antennaCache.end())
+        {
+            PhasedArrayModel::ComplexVector w(1);
+            w[0] = {1.0, 0.0};
+            auto txAnt = CreateObjectWithAttributes<UniformPlanarArray>(
                 "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
-        Ptr<UniformPlanarArray> rxAnt =
-            CreateObjectWithAttributes<UniformPlanarArray>(
+            txAnt->SetBeamformingVector(w);
+            auto rxAnt = CreateObjectWithAttributes<UniformPlanarArray>(
                 "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
-        PhasedArrayModel::ComplexVector w(1);
-        w[0] = std::complex<double>(1.0, 0.0);
-        txAnt->SetBeamformingVector(w);
-        rxAnt->SetBeamformingVector(w);
-        Ptr<SpectrumSignalParameters> mutableParams = params->Copy();
+            rxAnt->SetBeamformingVector(w);
+            m_antennaCache[key] = {txAnt, rxAnt};
+        }
+
+        auto& [txAnt, rxAnt] = m_antennaCache.at(key);
+        Ptr<SpectrumSignalParameters> p = params->Copy();
         auto rxParams = m_sionna->CalcRxPowerSpectralDensity(
-            mutableParams, tx, rx, txAnt, rxAnt);
+            p, tx, rx, txAnt, rxAnt);
         return rxParams->psd;
     }
 
-    // Required: SpectrumPropagationLossModel has this as pure virtual.
-    // Sionna uses its own internal RNG seeding so stream assignment is a no-op.
     int64_t DoAssignStreams(int64_t stream) override { return 0; }
 
 private:
+    static CacheKey MakeKey(Ptr<const MobilityModel> a, Ptr<const MobilityModel> b)
+    {
+        return {a.operator->(), b.operator->()};
+    }
+
     Ptr<SionnaRtSpectrumPropagationLossModel> m_sionna;
+
+    // Keyed on (tx ptr, rx ptr) — pointers are stable for the simulation lifetime.
+    // Same UniformPlanarArray object IDs on every call = cache hit in
+    // SionnaRtChannelModel::m_channelMatrixMap.
+    mutable AntennaMap m_antennaCache;
 };
 
 // global guard against scheduling beyond stop time
@@ -123,6 +162,10 @@ struct ComputeSnrParams
     Ptr<PhasedArrayModel> txAntenna; //!< the tx antenna array
     Ptr<PhasedArrayModel> rxAntenna; //!< the rx antenna array
 };
+
+// flag enabling/disabling periodic SNR computation (tuneable via CLI)
+static bool g_enableSnr = true;
+
 
 // per‑level traffic counters
 struct NetwortkLevelTraffic {
@@ -603,6 +646,7 @@ main(int argc, char* argv[])
     double timeRes = 0.1;    // time resolution in seconds
     bool verbose = true;    // enable verbose logging
     bool probeVerbose = false; // print probe send/receive messages (will be copied to g_probeVerbose)
+    bool enableSnr = false;    // whether to perform periodic SNR computations
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
     std::string SceneFile = "scratch/layout.xml"; // Mitsuba scene XML file (relative or absolute path)
@@ -670,6 +714,7 @@ main(int argc, char* argv[])
     cmd.AddValue("endTime", "Simulation end time in seconds", endTime);
     cmd.AddValue("timeRes", "Time resolution in seconds", timeRes);
     cmd.AddValue("probeVerbose", "Enable detailed probe send/receive logging", probeVerbose);
+    cmd.AddValue("enableSnr", "Perform periodic SNR computations", enableSnr);
 
     cmd.AddValue("maxDepth", "Maximum reflection/refraction depth", RtPathSolverConfig.maxDepth);
     cmd.AddValue("los", "Include line-of-sight path", RtPathSolverConfig.los);
@@ -690,6 +735,8 @@ main(int argc, char* argv[])
     cmd.AddValue("seed", "Random seed", RtPathSolverConfig.seed);
 
     cmd.Parse(argc, argv);
+    // copy CLI flag into global so other functions could inspect if needed
+    g_enableSnr = enableSnr;
 
     // after parsing, verify scene file / output directory (user may have overridden defaults)
     bool haveSceneFile = !SceneFile.empty() && std::filesystem::exists(SceneFile);
@@ -800,16 +847,15 @@ main(int argc, char* argv[])
     // (needed by SpectrumWifiPhy which uses its own Wi-Fi spectrum model).
     Ptr<MultiModelSpectrumChannel> channel = CreateObject<MultiModelSpectrumChannel>();
     channel->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
-    // The SionnaRt model no longer derives from SpectrumPropagationLossModel in
-    // recent ns-3 versions, so adding it to the spectrum channel results in a
-    // hard compile error.  We keep the object around for the explicit SNR
-    // computation later, but do not attach it to the channel; the channel will
-    // fall back to the default (free‑space) behaviour.
+    // SionnaRtSpectrumPropagationLossModel derives from
+    // PhasedArraySpectrumPropagationLossModel, which SpectrumWifiPhy cannot
+    // satisfy (it has no PhasedArrayModel slot).  The wrapper adapts the
+    // interface: it holds one stable UniformPlanarArray per directed link so
+    // SionnaRtChannelModel's internal m_channelMatrixMap cache (keyed on
+    // antenna ID) gets hits on every call within the UpdatePeriod window.
     Ptr<SionnaSpectrumWrapper> wrapper = CreateObject<SionnaSpectrumWrapper>();
     wrapper->SetSionnaModel(m_spectrumLossModel);
     channel->AddSpectrumPropagationLossModel(wrapper);
-    // channel->AddPhasedArraySpectrumPropagationLossModel(
-    //         DynamicCast<PhasedArraySpectrumPropagationLossModel>(m_spectrumLossModel));
 
     // Use Spectrum‑based Wi‑Fi PHY so the underlying channel is a SpectrumChannel
     SpectrumWifiPhyHelper wifiPhy; // = SpectrumWifiPhyHelper::Default();
@@ -903,6 +949,34 @@ main(int argc, char* argv[])
         nodes.Get(i)->GetObject<MobilityModel>()->SetPosition(positions[i]);
     }
 
+    // Pre-register all directed link antenna pairs in the wrapper cache.
+    // This allocates one stable UniformPlanarArray per (tx, rx) pair before
+    // any packet is sent.  Because SionnaRtChannelModel keys its internal
+    // m_channelMatrixMap on antenna object IDs, reusing the same objects on
+    // every call guarantees cache hits within the UpdatePeriod window and
+    // avoids redundant PathSolver invocations for every WiFi packet event.
+    {
+        PhasedArrayModel::ComplexVector w(1);
+        w[0] = std::complex<double>(1.0, 0.0);
+        for (uint32_t i = 0; i < nodes.GetN(); ++i)
+        {
+            for (uint32_t j = 0; j < nodes.GetN(); ++j)
+            {
+                if (i == j) continue;
+                auto txAnt = CreateObjectWithAttributes<UniformPlanarArray>(
+                    "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
+                txAnt->SetBeamformingVector(w);
+                auto rxAnt = CreateObjectWithAttributes<UniformPlanarArray>(
+                    "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
+                rxAnt->SetBeamformingVector(w);
+                wrapper->PreRegisterLink(
+                    nodes.Get(i)->GetObject<MobilityModel>(),
+                    nodes.Get(j)->GetObject<MobilityModel>(),
+                    txAnt, rxAnt);
+            }
+        }
+    }
+
     // select devices 0 and 1 as tx/rx for Sionna SNR computation
     Ptr<NetDevice> txDev = devices.Get(0);
     Ptr<NetDevice> rxDev = devices.Get( std::min<uint32_t>(1, devices.GetN() - 1) );
@@ -965,20 +1039,25 @@ main(int argc, char* argv[])
 
     // schedule periodic SNR computations; track maximum scheduled time
     double lastSnrTime = 0.0;
-    for (int i = 0; i < floor(endTime / timeRes); i++) {
-        double t = timeRes * i;
-        ComputeSnrParams params{txMob, rxMob, txPow, noiseFigure, txAntenna, rxAntenna};
-        Simulator::Schedule(Seconds(t), &ComputeSnr, params);
-        if (t > lastSnrTime) lastSnrTime = t;
-    }
-    if (lastSnrTime > (endTime + 5.0)) {
-        std::cerr << "[warning] last Snr event (" << lastSnrTime << "s) > stop time (" << endTime + 5.0 << "s)" << std::endl;
+    if (g_enableSnr) {
+        std::cout << "[info] scheduling periodic SNR computations every " << timeRes << " seconds\n";
+        for (int i = 0; i < floor(endTime / timeRes); i++) {
+            double t = timeRes * i;
+            ComputeSnrParams params{txMob, rxMob, txPow, noiseFigure, txAntenna, rxAntenna};
+            Simulator::Schedule(Seconds(t), &ComputeSnr, params);
+            if (t > lastSnrTime) lastSnrTime = t;
+        }
+        if (lastSnrTime > (endTime + 5.0)) {
+            std::cerr << "[warning] last Snr event (" << lastSnrTime << "s) > stop time (" << endTime + 5.0 << "s)" << std::endl;
+        }
+    } else {
+        NS_LOG_INFO("SNR computation disabled for this run");
     }
 
     // compute global stop time and install it
     g_simStopTime = endTime + 5.0;
     std::cout << "[info] simulation will stop at " << g_simStopTime << " seconds" << std::endl;
-    Simulator::Schedule(Seconds(1), &LogSimTime);
+    Simulator::Schedule(Seconds(0), &LogSimTime);
     Simulator::Stop(Seconds(g_simStopTime));
 
     // check SNR scheduling boundaries
