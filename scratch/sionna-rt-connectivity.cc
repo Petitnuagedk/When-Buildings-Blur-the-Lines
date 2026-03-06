@@ -11,6 +11,7 @@
 #include "ns3/internet-module.h"
 #include "ns3/aodv-module.h"
 #include "ns3/olsr-helper.h"
+#include "ns3/dsdv-helper.h"
 #include "ns3/applications-module.h"
 #include "ns3/wifi-module.h"  // needed for WifiHelper
 #include "ns3/spectrum-wifi-phy.h"  // SpectrumWifiPhyHelper
@@ -394,10 +395,10 @@ WriteFlowInformationToCsv(const std::string& filePath) {
 }
 
 static void
-WriteAllMetricsToCsv()
+WriteAllMetricsToCsv(const std::string &path)
 {
-    WriteFlowInformationToCsv("flow_information.csv");
-    std::ofstream csvFileNT("Network_traffic_mapping.csv");
+    WriteFlowInformationToCsv(path + "/flow_information.csv");
+    std::ofstream csvFileNT(path + "/Network_traffic_mapping.csv");
     if (csvFileNT.is_open()) {
         csvFileNT << "RouteSignalizationPacketsSent,RouteSignalizationPacketsReceived,AppPacketsSent,AppPacketsReceived\n";
         csvFileNT << networkLevelTraffic.RouteSignalizationPacketsSent << ","
@@ -406,7 +407,7 @@ WriteAllMetricsToCsv()
                   << networkLevelTraffic.AppPacketsReceived << "\n";
         csvFileNT.close();
     }
-    std::ofstream csvNode("node_traffic_mapping.csv");
+    std::ofstream csvNode(path + "/node_traffic_mapping.csv");
     if (csvNode.is_open()) {
         csvNode << "Node,AppTx,AppRx,DeviceTx,DeviceRx,PacketsDroppedRerr,PacketsDroppedNoRoute\n";
         for (const auto& entry : nodeleveltrafficMap) {
@@ -647,11 +648,12 @@ main(int argc, char* argv[])
     bool verbose = true;    // enable verbose logging
     bool probeVerbose = false; // print probe send/receive messages (will be copied to g_probeVerbose)
     bool enableSnr = false;    // whether to perform periodic SNR computations
+    std::string resultPath = "."; // directory where metrics will be written
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
     std::string SceneFile = "scratch/layout.xml"; // Mitsuba scene XML file (relative or absolute path)
     std::string LayoutFile = "scratch/UrbanCompLayout.csv"; // CSV with node positions
-    int numSource = 1; // default number of source nodes for traffic
+    int numSource = 6; // default number of source nodes for traffic
     std::string routing = "olsr"; // routing protocol: olsr or aodv
     int maxNodes = 10; // override number of nodes created (<=0 = use all positions)
 
@@ -715,6 +717,7 @@ main(int argc, char* argv[])
     cmd.AddValue("timeRes", "Time resolution in seconds", timeRes);
     cmd.AddValue("probeVerbose", "Enable detailed probe send/receive logging", probeVerbose);
     cmd.AddValue("enableSnr", "Perform periodic SNR computations", enableSnr);
+    cmd.AddValue("resultPath", "Directory to store metric output files", resultPath);
 
     cmd.AddValue("maxDepth", "Maximum reflection/refraction depth", RtPathSolverConfig.maxDepth);
     cmd.AddValue("los", "Include line-of-sight path", RtPathSolverConfig.los);
@@ -737,6 +740,10 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     // copy CLI flag into global so other functions could inspect if needed
     g_enableSnr = enableSnr;
+    // ensure output directory exists
+    if (!resultPath.empty() && !std::filesystem::exists(resultPath)) {
+        std::filesystem::create_directories(resultPath);
+    }
 
     // after parsing, verify scene file / output directory (user may have overridden defaults)
     bool haveSceneFile = !SceneFile.empty() && std::filesystem::exists(SceneFile);
@@ -797,15 +804,15 @@ main(int argc, char* argv[])
     // apply the solver configuration
     m_spectrumLossModel->SetRtPathSolverConfig(RtPathSolverConfig);
 
-    // Load node positions from CSV and create nodes accordingly
-    std::vector<Vector> positions;
+    // Load node positions from CSV
+    std::vector<Vector> rawPositions;
     {
         std::ifstream csv(LayoutFile);
         if (!csv.is_open())
         {
             std::cerr << "Warning: could not open layout file " << LayoutFile << ". Falling back to two-node default.\n";
-            positions.push_back(Vector(-20.0, 0.0, 5.0));
-            positions.push_back(Vector(distance - 20.0, 0.0, 5.0));
+            rawPositions.push_back(Vector(-20.0, 0.0, 5.0));
+            rawPositions.push_back(Vector(distance - 20.0, 0.0, 5.0));
         }
         else
         {
@@ -825,23 +832,39 @@ main(int argc, char* argv[])
                 if (!std::getline(ss, item, ','))
                     continue;
                 try { y = std::stod(item); } catch (...) { continue; }
-                positions.push_back(Vector(x, y, 5.0)); // 5 m AGL
+                rawPositions.push_back(Vector(x, y, 5.0)); // 5 m AGL
             }
-            if (positions.empty())
+            if (rawPositions.empty())
             {
-                positions.push_back(Vector(-20.0, 0.0, 5.0));
-                positions.push_back(Vector(distance - 20.0, 0.0, 5.0));
+                rawPositions.push_back(Vector(-20.0, 0.0, 5.0));
+                rawPositions.push_back(Vector(distance - 20.0, 0.0, 5.0));
             }
         }
     }
-    // apply node limit if requested
-    if (maxNodes > 0 && static_cast<int>(positions.size()) > maxNodes) {
-        positions.resize(maxNodes);
-        NS_LOG_INFO("Truncated layout to " << maxNodes << " nodes");
+    // determine number of nodes to create
+    int nNodes = rawPositions.size();
+    if (maxNodes > 0 && nNodes > maxNodes) {
+        nNodes = maxNodes;
+        NS_LOG_INFO("Limiting layout to " << nNodes << " nodes");
+    }
+    // randomly sample positions if we are trimming
+    std::vector<Vector> positions;
+    if (nNodes == (int)rawPositions.size()) {
+        positions = rawPositions;
+    } else {
+        std::mt19937 rng(RtPathSolverConfig.seed);
+        std::uniform_int_distribution<size_t> dist(0, rawPositions.size() - 1);
+        for (int i = 0; i < nNodes; ++i) {
+            size_t idx = dist(rng);
+            positions.push_back(rawPositions[idx]);
+            rawPositions.erase(rawPositions.begin() + idx);
+            if (rawPositions.empty()) break;
+            dist = std::uniform_int_distribution<size_t>(0, rawPositions.size() - 1);
+        }
     }
 
     NodeContainer nodes;
-    nodes.Create(positions.size());
+    nodes.Create(nNodes);
 
     // Configure a spectrum channel that supports multiple spectrum models
     // (needed by SpectrumWifiPhy which uses its own Wi-Fi spectrum model).
@@ -881,6 +904,13 @@ main(int argc, char* argv[])
     {
         AodvHelper aodv;
         stack.SetRoutingHelper(aodv);
+    }
+    else if (routing == "dsdv")
+    {
+        DsdvHelper dsdv;
+        dsdv.Set("PeriodicUpdateInterval", TimeValue(Seconds(5)));
+        dsdv.Set("SettlingTime", TimeValue(Seconds(5)));
+        stack.SetRoutingHelper(dsdv);
     }
     else
     {
@@ -1083,10 +1113,10 @@ main(int argc, char* argv[])
     }
 
     // write collected traffic metrics after simulation finishes
-    WriteAllMetricsToCsv();
+    WriteAllMetricsToCsv(resultPath);
 
     // write connectivity & mobility result files
-    std::ofstream connFile("connectivityM-rt.csv");
+    std::ofstream connFile(resultPath + "/connectivityM-rt.csv");
     for (auto &mat : timeReceivedProbes) {
         for (auto &row : mat) {
             for (auto v: row) connFile << v << ",";
@@ -1096,7 +1126,7 @@ main(int argc, char* argv[])
     }
     connFile.close();
 
-    std::ofstream mobFile("mobility-rt.csv");
+    std::ofstream mobFile(resultPath + "/mobility-rt.csv");
     for (auto &frame : nodePositions) {
         for (auto &pos : frame) {
             mobFile << std::get<0>(pos) << "," << std::get<1>(pos) << "," << std::get<2>(pos) << "\n";

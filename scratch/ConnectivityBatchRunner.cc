@@ -6,7 +6,7 @@ namespace fs = std::filesystem;
 
 int main() {
     // root directory where all results will be stored
-    std::string rootDir = "ConnectivityDir";
+    std::string rootDir = "RT-batch-Dir";
 
     // subfolder structure is the same as UrbanCompMain: we put the
     // varying parameter under "numNodes" so it is easy to inspect.
@@ -16,7 +16,7 @@ int main() {
     std::vector<std::string> RAs = {"aodv", "olsr", "dsdv"};
 
     // number of nodes values to test (0..100 stepping by 10)
-    std::vector<std::string> numNodes = {"0","10","20","30","40","50","60","70","80","90","100"};
+    std::vector<std::string> numNodes = {"10","20","30","40","50","60","70","80","90","100"};
 
     // we keep an epoch loop to mimic UrbanCompMain, it can be used for seeds
     int numEpochs = 10;
@@ -34,7 +34,7 @@ int main() {
                     fs::path dirPath = fs::path(rootDir) / ("Epoch_" + std::to_string(epoch)) / RA / subDirs[0] / n;
                     fs::create_directories(dirPath);
 
-                    std::string runCmd = "./ns3 run scratch/sionna-rt-connectivity.cc -- --RA=" + RA
+                    std::string runCmd = "./ns3 run scratch/sionna-rt-connectivity.cc -- --routing=" + RA
                                          + " --numNodes=" + n
                                          + " --resultPath=" + dirPath.string()
                                          + " --Seed=" + std::to_string(epoch);
