@@ -23,6 +23,8 @@ Usage:
     python building_gen.py --cell 100 --bsize 80  # 100m grid, 80m wide buildings
     python building_gen.py --seed 42 --out layout.csv
     python building_gen.py --plot                 # visualise before saving
+    python building_gen.py --nodes 50 --points-out nodes.csv  # generate 50 positions
+    python building_gen.py --nodes 50 --clearance 10          # with buffer around buildings
 """
 
 import argparse
@@ -95,6 +97,7 @@ def generate_layout(
     building_size: int  = 100,
     building_height: float = 25.0,
     profile_name: str  = "core",
+    min_spacing:  float = 10.0,
     seed:         int   = None,
 ) -> list[dict]:
     """
@@ -104,17 +107,24 @@ def generate_layout(
     ----------
     area_size       : total side length of the square simulation area (m)
     cell_size       : grid cell size (m); buildings are centred in each cell
-    building_size   : building footprint side length (m); must be <= cell_size
+    building_size   : building footprint side length (m); must be <= cell_size - min_spacing
     building_height : building height (m)
     profile_name    : density profile key (see PROFILES dict)
+    min_spacing     : minimum gap between adjacent buildings (m)
     seed            : random seed for reproducibility (None = random)
 
     Returns
     -------
     List of dicts with keys: xmin, xmax, ymin, ymax, zmin, zmax
     """
+    # ensure spacing constraint
     if building_size > cell_size:
         raise ValueError("building_size must be <= cell_size")
+    if building_size > cell_size - min_spacing:
+        raise ValueError(
+            f"building_size too large for required spacing ({min_spacing}m); "
+            f"increase cell_size or reduce building_size"
+        )
 
     if profile_name not in PROFILES:
         raise ValueError(f"Unknown profile '{profile_name}'. "
@@ -146,6 +156,67 @@ def generate_layout(
     return buildings
 
 
+# ------------------------------------------------------------------
+# NODE POSITION GENERATOR
+# ------------------------------------------------------------------
+
+def point_in_building(px: float, py: float, b: dict, clearance: float = 0.0) -> bool:
+    """Return True if point lies within building footprint expanded by clearance."""
+    if (px >= b["xmin"] - clearance and px <= b["xmax"] + clearance and
+        py >= b["ymin"] - clearance and py <= b["ymax"] + clearance):
+        return True
+    return False
+
+
+def generate_positions(
+    count: int,
+    area_size: float,
+    buildings: list[dict],
+    clearance: float = 0.0,
+    seed: int = None,
+) -> list[tuple[float, float]]:
+    """Generate random positions within the area and outside buildings.
+
+    Parameters
+    ----------
+    count      : number of positions to generate
+    area_size  : side length of square area (m), centred on origin
+    buildings  : list of building dicts (see :func:`generate_layout`)
+    clearance  : additional buffer distance around buildings (m)
+    seed       : random seed for reproducibility
+
+    Returns
+    -------
+    List of (x, y) tuples representing valid positions.
+    """
+    rng = random.Random(seed)
+    half = area_size / 2.0
+    pts: list[tuple[float, float]] = []
+    attempts = 0
+    max_attempts = count * 1000  # prevent infinite loops
+    while len(pts) < count and attempts < max_attempts:
+        attempts += 1
+        x = rng.uniform(-half, half)
+        y = rng.uniform(-half, half)
+        # reject if inside any building or within clearance
+        if any(point_in_building(x, y, b, clearance) for b in buildings):
+            continue
+        pts.append((x, y))
+    if len(pts) < count:
+        raise RuntimeError(f"Only generated {len(pts)} of {count} positions; "
+                           "consider reducing clearance or increasing area size")
+    return pts
+
+
+def write_positions(positions: list[tuple[float, float]], path: str):
+    """Write positions to CSV with columns x,y."""
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["x", "y"])
+        w.writerows(positions)
+    print(f"Written {len(positions)} positions to {path}")
+
+
 def write_csv(buildings: list[dict], path: str):
     fieldnames = ["xmin", "xmax", "ymin", "ymax", "zmin", "zmax"]
     with open(path, "w", newline="") as f:
@@ -155,7 +226,7 @@ def write_csv(buildings: list[dict], path: str):
     print(f"Written {len(buildings)} buildings to {path}")
 
 
-def plot_layout(buildings: list[dict], area_size: int, profile_name: str):
+def plot_layout(buildings: list[dict], area_size: int, profile_name: str, positions: list[tuple[float,float]] | None = None):
     try:
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
@@ -173,6 +244,10 @@ def plot_layout(buildings: list[dict], area_size: int, profile_name: str):
                  f"({len(buildings)} buildings)", fontsize=11)
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
+    # draw grid and central axes for orientation
+    ax.grid(True, linestyle='--', linewidth=0.5, color="#cccccc")
+    ax.axhline(0, color="#444444", linewidth=1)
+    ax.axvline(0, color="#444444", linewidth=1)
 
     for b in buildings:
         w = b["xmax"] - b["xmin"]
@@ -183,6 +258,12 @@ def plot_layout(buildings: list[dict], area_size: int, profile_name: str):
             facecolor="#6688aa", alpha=0.75
         )
         ax.add_patch(rect)
+
+    # draw node positions if provided
+    if positions:
+        xs, ys = zip(*positions)
+        ax.scatter(xs, ys, c="red", s=20, marker="o", label="nodes")
+        ax.legend(loc="upper right", fontsize=8)
 
     # Coverage stats
     cell_area     = (b["xmax"] - b["xmin"]) * (b["ymax"] - b["ymin"])
@@ -252,15 +333,24 @@ def main():
                         help="Random seed for reproducibility")
     parser.add_argument("--out",     default="building_layout.csv",
                         help="Output CSV path (default: building_layout.csv)")
+    parser.add_argument("--spacing", type=float, default=10.0,
+                        help="Minimum distance between buildings (m)")
+    parser.add_argument("--nodes",   type=int,   default=0,
+                        help="Number of random positions to generate inside area")
+    parser.add_argument("--clearance", type=float, default=0.0,
+                        help="Minimum distance from buildings for generated positions (m)")
+    parser.add_argument("--points-out", default=None,
+                        help="CSV path to write generated positions (x,y)")
     parser.add_argument("--plot",    action="store_true",
-                        help="Visualise the layout with matplotlib")
+                        help="Visualise the layout with matplotlib (x-y axes display)")
     parser.add_argument("--ns3",     action="store_true",
                         help="Print a ready-to-paste ns-3 C++ snippet")
     args = parser.parse_args()
 
     print(f"Generating layout: {args.size}x{args.size}m, "
           f"cell={args.cell}m, building={args.bsize}m, "
-          f"height={args.height}m, profile={args.profile}, seed={args.seed}")
+          f"height={args.height}m, profile={args.profile}, "
+          f"min_spacing={args.spacing}m, seed={args.seed}")
 
     buildings = generate_layout(
         area_size       = args.size,
@@ -268,6 +358,7 @@ def main():
         building_size   = args.bsize,
         building_height = args.height,
         profile_name    = args.profile,
+        min_spacing     = args.spacing,
         seed            = args.seed,
     )
 
@@ -278,8 +369,23 @@ def main():
 
     write_csv(buildings, args.out)
 
+    # optionally generate node positions
+    if args.nodes > 0:
+        pts = generate_positions(
+            count = args.nodes,
+            area_size = args.size,
+            buildings = buildings,
+            clearance = args.clearance,
+            seed = args.seed,
+        )
+        if args.points_out:
+            write_positions(pts, args.points_out)
+        else:
+            print(f"Generated {len(pts)} positions (no output file specified)")
+
     if args.plot:
-        plot_layout(buildings, args.size, args.profile)
+        plot_layout(buildings, args.size, args.profile,
+                    positions = pts if args.nodes > 0 else None)
 
     if args.ns3:
         print_ns3_snippet(buildings)
