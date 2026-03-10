@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <random>
 
 using namespace ns3;
 namespace py = pybind11;
@@ -674,8 +675,8 @@ main(int argc, char* argv[])
     RtPathSolverConfig.maxDepth = 2;              // Maximum reflection/refraction depth
     RtPathSolverConfig.los = true;                // Include line-of-sight path
     RtPathSolverConfig.specularReflection = true; // Enable specular reflections
-    RtPathSolverConfig.diffuseReflection = true;  // Enable diffuse reflections
-    RtPathSolverConfig.diffraction = false;       // Disable diffraction
+    RtPathSolverConfig.diffuseReflection = false;  // Enable diffuse reflections
+    RtPathSolverConfig.diffraction = true;       // Disable diffraction
     RtPathSolverConfig.edge_diffraction = false;  // Disable edge diffraction
     RtPathSolverConfig.refraction = true;         // Enable refractions
     RtPathSolverConfig.syntheticArray = true;     // Use synthetic array processing
