@@ -200,7 +200,6 @@ void readUrbanData(const std::string& nodesFilename,
             std::stringstream ss(line);
             std::vector<double> values;
             double v;
-            char comma;
             while (ss >> v) {
                 values.push_back(v);
                 if (ss.peek() == ',') ss.ignore();

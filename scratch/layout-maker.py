@@ -13,6 +13,8 @@ density profile defined by the profile functions below.
 Output columns: xmin, xmax, ymin, ymax, zmin, zmax
   (zmin is always 0; zmax is building height)
 
+C:/Users/hugol/anaconda3/python.exe c:/Users/hugol/Documents/Firenze/B/j1/When-Buildings-Blur-the-Lines/scratch/layout-maker.py --plot --cell 75 --bsize 80 --spacing 10 --nodes 250 --clearance 3 --points-out nodes.csv --seed 41 --bsize 50
+
 Usage:
     python building_gen.py                        # default: 1500x1500, core-heavy
     python building_gen.py --size 2000            # 2000x2000 area
