@@ -467,33 +467,15 @@ PhyEntity::StartReceivePreamble(Ptr<const WifiPpdu> ppdu,
         DropPreambleEvent(ppdu, TXING, endRx);
         break;
     case WifiPhyState::CCA_BUSY:
-        if (m_wifiPhy->m_currentEvent)
-        {
-            if (m_wifiPhy->m_frameCaptureModel &&
-                m_wifiPhy->m_frameCaptureModel->IsInCaptureWindow(
-                    m_wifiPhy->m_timeLastPreambleDetected) &&
-                m_wifiPhy->m_frameCaptureModel->CaptureNewFrame(m_wifiPhy->m_currentEvent, event))
-            {
-                AbortCurrentReception(FRAME_CAPTURE_PACKET_SWITCH);
-                NS_LOG_DEBUG("Switch to new packet");
-                StartPreambleDetectionPeriod(event);
-            }
-            else
-            {
-                NS_LOG_DEBUG("Drop packet because already decoding preamble");
-                DropPreambleEvent(ppdu, BUSY_DECODING_PREAMBLE, endRx);
-            }
-        }
-        else
-        {
-            StartPreambleDetectionPeriod(event);
-        }
-        break;
+        /*
+        * When CCA_BUSY expires at the exact same simulation time as a new PPDU arrival,
+        * GetState() returns IDLE (strict >) while m_currentEvent may still be set from an
+        * in-progress preamble reception chain. Fall through to handle both states identically.
+        */
     case WifiPhyState::IDLE:
-        // When CCA_BUSY expires at the exact same simulation time as a new PPDU arrival,
-        // GetState() returns IDLE (strict >), but m_currentEvent may still be set from an
-        // in-progress preamble reception chain whose next scheduled event has not fired yet.
-        // Handle this the same way as the CCA_BUSY case to avoid an invalid assertion.
+        NS_ASSERT_MSG((m_state->GetState() != WifiPhyState::IDLE) || !m_wifiPhy->m_currentEvent ||
+                          (m_state->GetLastTime({WifiPhyState::CCA_BUSY}) == Simulator::Now()),
+                      "IDLE with non-null m_currentEvent but CCA_BUSY did not just end");
         if (m_wifiPhy->m_currentEvent)
         {
             if (m_wifiPhy->m_frameCaptureModel &&
@@ -1349,12 +1331,7 @@ PhyEntity::GetDelayUntilCcaEnd(dBm_u threshold, const WifiSpectrumBandInfo& band
 void
 PhyEntity::SwitchMaybeToCcaBusy(const Ptr<const WifiPpdu> ppdu)
 {
-    // We are here because we have received the first bit of a packet and we are
-    // not going to be able to synchronize on it
-    // In this model, CCA becomes busy when the aggregation of all signals as
-    // tracked by the InterferenceHelper class is higher than the CcaBusyThreshold
-    const auto ccaIndication = GetCcaIndication(ppdu);
-    if (ccaIndication.has_value())
+    if (const auto ccaIndication = GetCcaIndication(ppdu))
     {
         NS_LOG_DEBUG("CCA busy for " << ccaIndication.value().second << " during "
                                      << ccaIndication.value().first.As(Time::S));
@@ -1363,9 +1340,17 @@ PhyEntity::SwitchMaybeToCcaBusy(const Ptr<const WifiPpdu> ppdu)
                                       {});
         return;
     }
+
     if (ppdu)
     {
-        SwitchMaybeToCcaBusy(nullptr);
+        SwitchMaybeToCcaBusy();
+        return;
+    }
+
+    if (m_wifiPhy->IsStateCcaBusy())
+    {
+        NS_LOG_DEBUG("Update CCA indication to IDLE");
+        m_state->SwitchMaybeToCcaBusy(Seconds(0), WIFI_CHANLIST_PRIMARY, {});
     }
 }
 
