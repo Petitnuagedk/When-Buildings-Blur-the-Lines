@@ -1,0 +1,794 @@
+
+
+It might be related to number of nodes after all. Does running a 70 node simulation with 7 sources/sink pairs feels like something that would be to heavy and overwhelm the PHY layer ? Is it possible that a to high frequency of event 'break' ns-3 ?
+  12:33 PM
+
+If it is the case, is there a configuration that allows ns-3 to run slower and gives time for events to complete safely ?
+  12:34 PM
+
+TwoRayGroundPropagationLossModel did raise the error given 60 or more nodes
+Gabriel Ferreira
+12:35 PM
+
+I doubt it "overwhelms" the PHY (this is no real PHY, so that isn't a thing).
+More likely events being put/removed in incorrect order.
+  12:36 PM
+
+For this kind of behavior change with propagation loss model, I'd say there is probably a break point somewhere in the code, and these other models cross it, while your custom doesn't.
+Hugo Le Dirach
+12:37 PM
+
+A break point ? You mean "Assert" ?
+  12:38 PM
+
+Because I did not put any break point in the src code (i'm a "std::cout" person for debug)
+Gabriel Ferreira
+12:39 PM
+
+No. Break point of the model. e.g. Friis is good at a certain frequency range (500-2400 MHz). If you try to use mmWave frequency range, the results are complete garbage.
+Hugo Le Dirach
+12:40 PM
+
+I don't mind garbage results, but at least the simulation would run. I'm using WIFI_STANDARD_80211gso 2.4GHz
+  12:42 PM
+
+My custom loss model inherit from PropagationLossModel and is called through DoCalcRxPower so in theory it should behave the same.
+  12:45 PM
+
+I used gdb to see what was wrong and I get this
+Screenshot from 2025-05-27 12-45-02.png
+Gabriel Ferreira
+12:45 PM
+
+I don't know. This is just my hypothesis. You have the code and can debug it. :P
+You should have received EndPreambleDetectionPeriod first
+Hugo Le Dirach
+12:46 PM
+
+Alright, thank you for the advises :)
+Gabriel Ferreira
+12:46 PM
+
+So you need to discover why EndPreambleDetectionPeriod was not called, or something reset the current event before getting to where you hit the assert
+Hugo Le Dirach
+12:48 PM
+
+Okay, this is some complex stuff, what has the authority to reset and event ?
+  12:50 PM
+
+thank you for your help I would have never went in this direction
+Gabriel Ferreira
+12:50 PM
+
+Search for m_wifiPhy->m_currentEvent = nullptr;. This is set when payload transmission finishes OK, when resetting reception, and when preamble is not detected.
+  12:50 PM
+
+In your particular case, I would guess preamble is not detected.
+  12:51 PM
+
+tadah
+
+ if (const auto power = m_wifiPhy->m_currentEvent->GetRxPower(measurementBand);
+        (!m_wifiPhy->m_preambleDetectionModel && maxRxPower && (*maxRxPower > Watt_u{0.0})) ||
+        (m_wifiPhy->m_preambleDetectionModel && power > Watt_u{0.0} &&
+         m_wifiPhy->m_preambleDetectionModel->IsPreambleDetected(WToDbm(power),
+                                                                 snr,
+                                                                 measurementChannelWidth)))
+
+  12:51 PM
+
+Check the power your are receiving from the different models. If too low, you are toast because of the preamble.
+  12:52 PM
+
+No idea how this is handled later.
+Hugo Le Dirach
+12:53 PM
+
+I see
+  12:54 PM
+
+So, just to be sure, it received the packet but the signal is to low to extract it so it cancels the reception and drop it
+Gabriel Ferreira
+12:55 PM
+
+This is my hypothesis. Needs to be confirmed.
+Hugo Le Dirach
+12:56 PM
+
+So then the wiphystate goes to IDLE
+  12:56 PM
+
+But the m_currentEvent is nullptr where it is expected to be something like 'listening' or something like that i imagine
+Gabriel Ferreira
+12:58 PM
+
+Yes
+Hugo Le Dirach
+12:59 PM
+
+I'm aware that I am missing probably a decent amount of knowledge on the phy-entity module and the standarts it follows but I'm going to assume that the solution to my problem is probably not by modifying phy-entity.cc
+  1:00 PM
+
+Thank you so much for your help
+Tom Henderson
+7:09 PM
+
+Hugo, looking at your stack trace, it looks like the StartReceivePreamble is called with a zero-sized map for the rxPowersW argument, which could cause a problem by referencing an invalid iterator (the iterator is not checked). If you are using YansWifiChannel models, this should not happen because there is an insertion of an element at the end of YansWifiChannel::Receive() method. If you are using Spectrum, it seems like the code in SpectrumWifiPhy::StartRx() should populate this map, so perhaps check that method and whether the bands parameter is empty for some reason. Anyway, there should not be a problem with Wi-fi module handling such a use case, so either a misconfiguration or a bug is lurking here.
+Hugo Le Dirach
+8:57 AM
+
+Hello Tom, thank you for observation on the matter, I am using YansWifiChannel models indeed. I naturally assumed it was a misconfiguration on my end but since everything is on default, I fear it is something more tricky.
+  9:02 AM
+
+I did a Log debug on the wifiphy to observe what was called and why did it went sideways
+
+There are a lot of messages since there are many nodes but I made a shorter version of the raw logs.
+Here is the logs of a "sain" process :
+
+----------------------Init of process----------------------
+[index=0][channel=1][band=2.4GHz] WifiPhy:Send(0x62657e3a8920, size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=false, packet=0x626580df3200), txpwrlvl: 0 preamble: LONG channel width: 20 GI: +800ns NTx: 1 Ness: 0 MPDU aggregation: false STBC: false FEC coding: BCC mode: ErpOfdmRate24Mbps Nss: 1)
+[index=0][channel=1][band=2.4GHz] WifiPhy:Send(0x62657e3a8920, size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=false, packet=0x626580df3200), txpwrlvl: 0 preamble: LONG channel width: 20 GI: +800ns NTx: 1 Ness: 0 MPDU aggregation: false STBC: false FEC coding: BCC mode: ErpOfdmRate24Mbps Nss: 1)
+[index=0][channel=1][band=2.4GHz] Transmitting without power restriction for +34000ns
+[index=0][channel=1][band=2.4GHz] WifiPhy:GetTxPowerForTransmission(0x62657e3a8920, 0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ])
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm with txPowerDbmPerMhz=3.0103 over 20 MHz
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm after applying m_powerDensityLimit=100
+[index=0][channel=1][band=2.4GHz] WifiPhy:GetTxPowerForTransmission(0x62657e3a8920, 0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ])
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm with txPowerDbmPerMhz=3.0103 over 20 MHz
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm after applying m_powerDensityLimit=100
+
+----------------------Start of process----------------------
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e3b6b90, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e431540, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e3e5e00, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4c81b0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+.
+.
+.
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e410580, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4150e0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4a2690, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590234, PSDU=size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=0, packet=0x626580df3200) ], +34000ns)
+
+----------------------Midle of process----------------------
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e3b6b90, +12000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e431540, +12000ns)
+.
+.
+.
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e43ad00, +12000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e48f910, +12000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e4816d0)
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e3ce520)
+.
+.
+.
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e4150e0)
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e4a2690)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e3b6b90, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e431540, +4000ns)
+.
+.
+.
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e48f910, +4000ns)
+
+----------------------End of process----------------------
+[index=0][channel=1][band=2.4GHz] WifiPhy:TxDone(0x62657e3a8920, size=14, normal MPDU (CTL_ACK Duration/ID=0us, RA=00:00:00:00:00:06, payloadSize=0, retryCount=0, queued=false, packet=0x626580df3200))
+[index=0][channel=1][band=2.4GHz] WifiPhy:Reset(0x62657e3a8920)
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e3a8920)
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e3b6b90)
+.
+.
+.
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e43ad00)
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e48f910)
+
+Where, even tho there are a lot of parallel function, we can see that their ordering is respected
+  9:04 AM
+
+And here is the last logs before the crash :
+
+----------------------Init of process----------------------
+[index=0][channel=1][band=2.4GHz] WifiPhy:Send(0x62657e3a8920, size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=true, residualLifetime=+11740.6us, inflight=true, packet=0x626580969970), txpwrlvl: 0 preamble: LONG channel width: 20 GI: +800ns NTx: 1 Ness: 0 MPDU aggregation: false STBC: false FEC coding: BCC mode: ErpOfdmRate48Mbps Nss: 1)
+[index=0][channel=1][band=2.4GHz] WifiPhy:Send(0x62657e3a8920, size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=true, residualLifetime=+11740.6us, inflight=true, packet=0x626580969970), txpwrlvl: 0 preamble: LONG channel width: 20 GI: +800ns NTx: 1 Ness: 0 MPDU aggregation: false STBC: false FEC coding: BCC mode: ErpOfdmRate48Mbps Nss: 1)
+[index=0][channel=1][band=2.4GHz] WifiPhy:AbortCurrentReception(0x62657e3a8920, SIGNAL_DETECTION_ABORTED_BY_TX)
+[index=0][channel=1][band=2.4GHz] Transmitting without power restriction for +210000ns
+[index=0][channel=1][band=2.4GHz] WifiPhy:GetTxPowerForTransmission(0x62657e3a8920, 0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11740.6us, inflight=1, packet=0x626580969970) ])
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm with txPowerDbmPerMhz=3.0103 over 20 MHz
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm after applying m_powerDensityLimit=100
+[index=0][channel=1][band=2.4GHz] WifiPhy:GetTxPowerForTransmission(0x62657e3a8920, 0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11740.6us, inflight=1, packet=0x626580969970) ])
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm with txPowerDbmPerMhz=3.0103 over 20 MHz
+[index=0][channel=1][band=2.4GHz] txPower=16.0206dBm after applying m_powerDensityLimit=100
+
+----------------------This should not be here----------------------
+
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e3e12a0, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e498fd0, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e4e0300, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e4db7a0, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e40ba20, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e4d6c40, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e4b5430, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e406ea0, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e427e60, +4000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:NotifyCcaBusy(0x62657e4150e0, +4000ns)
+
+----------------------Start of process----------------------
+
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e3b6b90, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11740.3us, inflight=1, packet=0x626580969970) ], +210000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e431540, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11740us, inflight=1, packet=0x626580969970) ], +210000ns)
+.
+.
+.
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4734b0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.6us, inflight=1, packet=0x626580969970) ], +210000ns)
+
+--- why is this here ---
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e4734b0)
+
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e3c9a10, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.6us, inflight=1, packet=0x626580969970) ], +210000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e3e12a0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.5us, inflight=1, packet=0x626580969970) ], +210000ns)
+
+--- why is this here ---
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e3e12a0)
+
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4abd50, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.4us, inflight=1, packet=0x626580969970) ], +210000ns)
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4e0300, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.4us, inflight=1, packet=0x626580969970) ], +210000ns)
+
+--- why is this here ---
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e4e0300)
+
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4b5430, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.4us, inflight=1, packet=0x626580969970) ], +210000ns)
+
+--- why is this here ---
+[index=0][channel=1][band=2.4GHz] WifiPhy:SwitchMaybeToCcaBusy(0x62657e4b5430)
+
+[index=0][channel=1][band=2.4GHz] WifiPhy:StartReceivePreamble(0x62657e4db7a0, [ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=590236, PSDU=size=1088, normal MPDU (DATA ToDS=0, FromDS=0, MoreFrag=0, Retry=1, PowerManagement=0, MoreData=0 Duration/ID=44us, DA(RA)=00:00:00:00:00:10, SA(TA)=00:00:00:00:00:03, BSSID=00:00:00:00:00:03, FragNumber=0, SeqNumber=2893, payloadSize=1060, retryCount=4, queued=1, residualLifetime=+11736.4us, inflight=1, packet=0x626580969970) ], +210000ns)
+
+(----------------------End of process----------------------)
+-> Never reached
+
+NS_ASSERT failed, cond="!m_wifiPhy->m_currentEvent", +152.460894185s 67 file=/home/hledirach/Documents/app/ns-allinone-3.44/ns-3.44/src/wifi/model/phy-entity.cc, line=490
+NS_FATAL, terminating
+  9:06 AM
+
+We can see that there is a mix up in the ordering of the function. My guess is that WifiPhy:AbortCurrentReception is linked with the source of the error since this error only occurs when it is called in the the first part of the process
+  10:01 AM
+
+I think this is a false lead
+  10:44 AM
+
+I did a better analysis (following Tom's advise):
+
+YansWifiChannel::Receive calls
+
+rxPowerW.insert(
+    {{{{0, 0}}, {{Hz_u{0}, Hz_u{0}}}}, (DbmToW(totalRxPower))}); // dummy band for YANS
+phy->StartReceivePreamble(ppdu, rxPowerW, ppdu->GetTxDuration());
+
+Which purpose is to ensure non-empty maps to be fed into StartReceivePreamble, however the debug showed us that the maps was indeed empty.
+
+The error is raised because PhyEntity::StartReceivePreamble at line 397 assumes the map is not empty by accessing the rxPowersW variable without checking it's integrity
+  10:48 AM
+
+Would it be better to add a
+NS_ASSERT(rxPowersW.size()!=0);
+Or to add an if-statement and handle such case by ensuring the dummy band
+  10:53 AM
+
+Could this problem be memory corruption ? Also, why pass rxPowersW as a copy and not as const reference ?
+  11:06 AM
+
+(deleted)
+Gabriel Ferreira
+11:12 AM
+
+Hugo Le Dirach said:
+
+    Could this problem be memory corruption ? Also, why pass rxPowersW as a copy and not as const reference ?
+
+Run with sanitizers../ns3 configure --enable-sanitizers && ./ns3 run whatever
+If it is memory corruption, it will tell you.
+Hugo Le Dirach
+11:13 AM
+
+will do , thank you
+  2:16 PM
+
+The error was raised for 3.44 but not on 3.37
+  2:17 PM
+
+I'll post results of sanity run when it finishes running
+  2:40 PM
+  3:37 PM
+
+No error with sanitizer
+  3:40 PM
+
+Also I put a std:cout to be sure that the map is empty and it is not
+  3:40 PM
+
+I think I'm going to let this one go
+  3:41 PM
+
+weird stuff
+Hugo Le Dirach
+4:32 PM
+
+I'm back on this problem. I have read the section #### 34.1.3.1.3. on YansWifiPhy and WifiPhyStateHelper (link) and made a new simulation check everything I could on my end and I believe there is a bug but the phy entity process is difficult to pin down from code and doc alone and I'm having trouble finding out what is the root of the problem.
+
+Summary :
+While running a simulation (using WIFI_STANDARD_80211g, 60 moving nodes in an open area and sending probes to neighbors to make a connection graph), the simulation crashes because while invoking WifiPhy::StartReceivePreamble (), the state of the device is IDLE but the current event of the wifiphy is not null, raising a assert. I have used the log_debug and the sanitizer but it gave me little help since I don't know what I'm looking for. My guess is that a function that is suppose to set the event to null doesn't do it, or that the device should be in Rx but is still in IDLE. Either way it is weird since thousands of successful exchange happen before this error.
+  4:33 PM
+
+Here is the log before crash and the script used to make the simulation
+urbanLinkConn3.cc
+log_conn.txt
+  4:35 PM
+
+I'm making a visual based on the description of section 34.1.3.1.3 of the documentation to try and get a better overview, if something is wrong feel free to point it out
+Screenshot from 2025-07-01 16-34-12.png
+  4:36 PM
+
+My question is : who has the authority to change state of the device ? Is it solely Phy entity ?
+  4:40 PM
+
+(If someone want to run the file, you will need this in the scratch folder too :
+urban_data_2.csv
+)
+  4:56 PM
+
+Here the power is high enough, we are in IDLE state but the currentEvent is not null
+Screenshot from 2025-07-01 16-55-15.png
+  4:56 PM
+
+The value of the m_currentEvent is :
+
+start=+9.60491e+09ns, end=+9.60495e+09ns, TXVECTOR=txpwrlvl: 0 preamble: LONG channel width: 20 GI: 800 NTx: 0 Ness: 0 MPDU aggregation: 0 STBC: 0 FEC coding: BCC mode: ErpOfdmRate36Mbps Nss: 1, power=8.66607e-12W, PPDU=[ preamble=LONG, modulation=ERP-OFDM, truncatedTx=N, UID=35516, PSDU=0x5555575100c0 ]
+Tom Henderson
+6:57 PM
+
+    Either way it is weird since thousands of successful exchange happen before this error.
+
+It may take some time to dig through this, but probably there is an unexpected state transition somewhere. Can you upload your artifacts to an ns-3 issue?
+Hugo Le Dirach
+6:59 PM
+
+What is an ns-3 issue, is it on the git ?
+Alberto Gallegos
+3:13 AM
+
+    What is an ns-3 issue, is it on the git ?
+
+@Hugo Le Dirach Tom means that you should make a gitlab "issue" and post what you mentioned in zullip there. So we can open the discussion to others and leave a lasting record that can later be followed up by a Merge request after we have reached consensus.
+Hugo Le Dirach
+11:37 AM
+
+Hello all,
+
+Disclaimer :warning: : I'm have still a LOT to learn on this type of problems and more generally on the inner working of compilers, debuggers and memory management. If I said something very wrong, please provide documentation so I can learn :) Thank you
+
+New update on this matter. I was doing new simulation on a completely (not really but still) different scenario and found myself stuck to this same error.
+
+It appears to be memory corruption. I used the debugger further and
+
+(gdb) print *m_wifiPhy->m_currentEvent.m_ptr
+$9 = {<ns3::SimpleRefCount<ns3::Event, ns3::Empty, ns3::DefaultDeleterns3::Event >> = {ns3::Empty = {}, m_count = 1494033792}, m_ppdu = {m_ptr = 0xb901e412f6}, m_startTime = { static g_markingTimes = 0x0, m_data = 25754883059613705}, m_endTime = {static g_markingTimes = 0x0, m_data = 145}, m_rxPowerW = std::map with 0 elements}
+
+Here as we can see the m_startTime is a staggering 25754883059613705 while the m_endTime is at 145. Further more, m_ppdu is not accessible (due to invalid memory address ? should be heap ?) :
+
+(gdb) x/8x 0xb901e412f6
+0xb901e412f6:   Cannot access memory at address 0xb901e412f6
+
+For context, I have 10 nodes doing 10 packets/per second all connected to each other and all (10) are sources toward singular targets (so 10 source/sink pairs), on top of that is the routing algorithm (olsr) which is sending hello messages frequently. So, there is about 150 packets in the air per seconds in the same wifi channel, is this order of magnitude enough to overwell ns-3 ? Is it due to my machine or to software ?
+
+In the case that this is the cause (memory corruption due to an event not being cleared in time?), what is ns-3 policy on this? Should the source code prevent such thing (like checking time ordering of events (something like m_startTime<m_endTime ) or is it the user responsibility not to put the simulator in edge cases (in which case I think it would be relevant to bring it up in documentation (if it's not already in)).
+  11:38 AM
+
+This above message is also available in the gitlab issue 1244
+Tom Henderson
+1:43 AM
+
+Please see my comment on issue #1244 (which I wasn't able to reproduce locally).
+
+    In the case that this is the cause (memory corruption due to an event not being cleared in time?), what is ns-3 policy on this?
+
+The policy is either to fix bugs (if it is a bug) or clarify that some limitation may exist (if the model is being used outside of the intended scope). It seems like your reported error case would be a bug that we should investigate and fix (if in the wifi code) but we will need a test case on ns-3-dev to reproduce it.
+Hugo Le Dirach
+9:09 AM
+
+Thank you for your feedback. Yes I intended to find a simpler test case that can reproduce the bug every time, which will also help us understand what causes it and then facilitate the fixing part.
+Hugo Le Dirach
+1:52 PM
+
+OKayyyyyy I'm finaly going mad on this bug and I won't stop focusing on it until it is fixed
+
+Here is a link to a github (2 files) where you can put the files in scratch and run the bug-generator.cc file to .... generate the bug
+
+All info here : #1244
+
+Long story short, this bug can be avoid using different seeds until you find one that let you avoid the rare case that make the simulation explod. But now I need to generate a Data Set and I cannot have 9 out of 10 simulation crashing randomly.
+
+Any help will be met with joy.
+Gabriel Ferreira
+2:28 PM
+
+I've tested 10 seeds in ns-3-dev head, and it did not crash. What were the exact settings you used to configure ns-3?
+  2:28 PM
+
+aah, rookie mistake. Asserts are disabled
+  2:28 PM
+
+Wait a minute
+Hugo Le Dirach
+2:28 PM
+
+What
+  2:28 PM
+
+Ho ok
+  2:29 PM
+
+I was half happy that it worked and half about to explode for being blocked for a month for nothing
+  2:31 PM
+
+default configuration (./n3 clean configure build)
+Tom Henderson
+3:19 PM
+
+Hugo, I tried your bug-generator program with three RngRun numbers (1, 2, 3) and it ran without error for me, on ns-3-dev.
+Hugo Le Dirach
+3:20 PM
+
+Yes it ran without error on .46.1 too
+  3:20 PM
+
+I need to read release notes from 45 and 46
+  3:21 PM
+
+I'm doing a extensive simulation run (400) to make sure I won't encounter it anymore
+Tom Henderson
+3:21 PM
+
+You noted in the issue tracker that the bug is present on ns-3-dev.
+Hugo Le Dirach
+3:22 PM
+
+I did and I'm pretty sure it was on ns-3-dev but I had it 4 month ago
+Tom Henderson
+3:22 PM
+
+Can you use ns-3.46.1 for your simulation work?
+Hugo Le Dirach
+3:22 PM
+
+yes
+  3:23 PM
+
+I'm sorry for the inconvenience
+Tom Henderson
+3:23 PM
+
+OK, should we close #1244 as resolved:fixed (as of ns-3.46)?
+Hugo Le Dirach
+3:24 PM
+
+Well, I would say yes but since I still don't have a clear understanding of why it was happening I don't know
+  3:24 PM
+
+I think it can be closed
+  3:25 PM
+
+I will ask here if i re encounter it
+Tom Henderson
+3:36 PM
+
+I would prefer to close it and have you reopen it if you encounter it again. We could do forensics on it but maintainers time is short and better spent on known unresolved bugs.
+Hugo Le Dirach
+3:36 PM
+
+I completely understand
+  3:37 PM
+
+I will look into it until my competence or interest runs out
+Gabriel Ferreira
+3:44 PM
+
+When I get home I will launch 1000s of runs to see if something pops up. It is basically manual fuzzying
+Hugo Le Dirach
+3:44 PM
+
+That's what I'm doing also
+  3:46 PM
+
+but if you can lauch it with 3.44 and see if you get the bug that would be great (I need to know if I'm just seeing things)
+  4:18 PM
+
+HaZa, using .46.1 I found some seeds that made the bug happened
+  4:22 PM
+
+testing some more with ns3 dev
+  4:29 PM
+
+46.1 bug triggered for seed 7 and 13
+  4:47 PM
+
+ns-3-dev bug triggered for seed 7 and 9
+  4:47 PM
+
+this is fun :clown:
+  4:53 PM
+
+in about 10 hours I'll post all seeds between 0 and 1000 that trigger the bug for 3.46.1 and ns-3-dev and you can double check on your side if the bug appears too
+Tom Henderson
+5:19 PM
+
+Hugo, I could not reproduce with either RngRun=7 or RngSeed=7. How are you observing this? Here are the commands I tried:
+
+./ns3 run bug-generator -- --RngRun=7
+./ns3 run bug-generator -- --RngSeed=7
+
+Hugo Le Dirach
+5:23 PM
+
+image.png
+  5:23 PM
+
+not the same name file but it has the same content
+  5:25 PM
+
+the variable name for rng is "Seed"
+  5:27 PM
+
+I used std::mt19937 because I needed rng for non-ns-3 related things too
+  5:33 PM
+
+I made a new commit adding
+
+// Set randomness
+RngSeedManager::SetSeed(Seed);
+RngSeedManager::SetRun(1);
+
+to make sure we run the same
+Tom Henderson
+6:18 PM
+
+OK, I was able to reproduce with --Seed=7.
+Gabriel Ferreira
+8:40 PM
+
+Me too. Seed 77.
+  10:38 PM
+
+Still don't know what is causing it for sure, but I had the suspicion it would be related to the was YansWifiChannel and PropagationDelay model. Something like a delay smaller than expected, and boom. Out of order event. Or very large delay, which causes signal to arrive too late, and something else is already happening.
+
+Only random stream affecting things seems to be random walk related.
+
+At reception, when it asserts I see
+rxPos=-190,475,2
+nodeId=23
+phyid=0
+dsssppdu
+ppdu->m_uid=85936
+rxDuration=304000ns
+m_wifiPhy->m_currentEvent->m_startTime=117011505963ns
+m_wifiPhy->m_currentEvent->m_endTime=117011579963ns
+  11:02 PM
+
+Sender at 379,-713, 2. Delay 4399ns
+txPower = 16dBm, rxPower=-93dBm
+Hugo Le Dirach
+11:03 PM
+
+Do you get this info by inserting code with a if statement before the assert ?
+Gabriel Ferreira
+11:03 PM
+
+yes
+Hugo Le Dirach
+11:04 PM
+
+Okay
+Gabriel Ferreira
+11:07 PM
+
+It is not because it is the biggest delay either. There is a successful transmission with 5393ns.
+Hugo Le Dirach
+11:08 PM
+
+Maybe it super small delay
+Gabriel Ferreira
+11:08 PM
+
+It isn't. The smallest was 2 ns, and the asserting one is 4399ns.
+Hugo Le Dirach
+11:09 PM
+
+Yes but is it possible that two signals arrive so close to one another that they some how enter at the same time
+  11:09 PM
+
+Idk
+Gabriel Ferreira
+11:09 PM
+
+Starting to suspect it is a rounding issue. ConstantSpeedPropagationDelayModel creates seconds from double, and we know this can be sketchy.
+Hugo Le Dirach
+11:10 PM
+
+But the assert is super wierd
+  11:10 PM
+
+The CCA is in a wrong state
+  11:11 PM
+
+That it should be able to be in
+Gabriel Ferreira
+11:14 PM
+
+Because it works most of the time and nobody had reported this so far, I'd think it is fine. It is just a freak accident that happens in a weird situation. Usually boundaries of value ranges (overflow, underflow), rounding issues, etc. =x
+  11:14 PM
+
+Trying sanitizers. Maybe UB.
+  11:35 PM
+
+Not UB. Tomorrow I continue.
+Hugo Le Dirach
+1:54 PM
+
+I just realise that YansWifi means Yet Another Network Simulator Wifi, mind blown
+Tommaso Pecorella
+2:40 PM
+
+Because it’s a model inherited from a previous network simulator called YANS
+Hugo Le Dirach
+2:40 PM
+
+yes I know about YANS, but I never linked the two
+  4:07 PM
+
+Regarding the bug:
+
+when looking at the time of simulation and expected end of the event I got
+
+Current simulator time: +2.55006e+11ns
+Event end time: +2.55006e+11ns (remaining: +30000ns)
+PPDU details: , NSS=1, Tx duration=+50000ns
+PHY state: IDLE
+Time last preamble detected: +2.55006e+11ns
+", +255.005719666s 13 file=/home/hledirach/Documents/app/ns-3/ns-3.46.1/src/wifi/model/phy-entity.cc, line=545
+NS_FATAL, terminating
+terminate called without an active exception
+Command 'build/scratch/ns3.46.1-urbanLinkConn2-default --Seed=7' died with <Signals.SIGABRT: 6>.
+
+I added a if statement to catch this event and clean it (m_wifiPhy->m_currentEvent = nullptr;) then let the simulation proceed and got the following :
+
+Current simulator time: +2.55006e+11ns
+Event end time: +2.55006e+11ns (remaining: +30000ns)
+PPDU details: , NSS=1, Tx duration=+50000ns
+PHY state: IDLE
+Time last preamble detected: +2.55006e+11ns
+NS_ASSERT failed, cond="!m_wifiPhy->IsStateRx()", +255.005723666s 13 file=/home/hledirach/Documents/app/ns-3/ns-3.46.1/src/wifi/model/phy-entity.cc, line=1096
+NS_FATAL, terminating
+terminate called without an active exception
+Command 'build/scratch/ns3.46.1-urbanLinkConn2-default --Seed=7' died with <Signals.SIGABRT: 6>.
+
+I'm guessing I have to do more than the clean up of the event to put the thing back on track but I'm still trying to understand
+  4:14 PM
+
+Screenshot from 2025-11-20 16-13-32.png
+This is the scope of my understanding (based on the doc and what I got from the code)
+  4:15 PM
+
+I'm trying to identify either : who is responsible for cleaning the event and is not doing it or how sets the state to IDLE and shouldn't
+  4:15 PM
+
+If anyone spots an error or would like to add precision to the figure, feel free
+  4:28 PM
+
+Hugo Le Dirach said:
+
+    how sets the state to IDLE and shouldn't
+
+who*
+Hugo Le Dirach
+9:49 AM
+
+Request for comments and suggestions on this figure regarding the WifiPhy behavior in a simple scenario
+Screenshot from 2025-11-24 09-48-42.png
+  10:00 AM
+
+Screenshot from 2025-11-24 10-00-03.png
+  10:40 AM
+
+wait, there is no variable holding the value of the state of the Wifiphy at any time, it's strictly a time base comparison ?
+  10:40 AM
+
+Screenshot from 2025-11-24 10-40-07.png
+  10:49 AM
+
+This feels unatural, why making this conception choice ?
+  10:55 AM
+
+in this function "now" now is called and compared to Time from other timers, this is done on the fly when StartReceivingPreamble is called. @Gabriel Ferreira following your theory of rounding error, here we have a 30 micro sec time error between current state and expected state
+
+    Current simulator time: +2.55006e+11ns
+    Event end time: +2.55006e+11ns (remaining: +30000ns)
+
+Would it be possible the error is around this ?
+  11:17 AM
+
+So we have :
+
+    ....Sim time = 2 5 5 0 0 6 0 0 0 0 0 0 ns
+    "Drift" time = 0 0 0 0 0 0 0 3 0 0 0 0 ns
+
+And when outputting time (through NS_LOG) it prints it has "+2.55006e+11ns", does that mean that when you retreive the value you get 255006000000 or 25006xxxxxx where x are the actual digit i.e. does it rounds the numbers ?
+  11:18 AM
+
+Also, the Tx duration for this PPDU is 50 micro sec (+5e+4ns) is that a typical or reasonable value ? It feels very small
+  12:35 PM
+
+it doesn't round numbers
+Gabriel Ferreira
+2:17 PM
+
+Hugo Le Dirach said:
+
+    in this function "now" now is called and compared to Time from other timers, this is done on the fly when StartReceivingPreamble is called. Gabriel Ferreira following your theory of rounding error, here we have a 30 micro sec time error between current state and expected state
+    ...
+    Would it be possible the error is around this ?
+
+In this particular case of the states, I think not a problem, since comparing Time with Time. I'm more afraid of computing some time as double, then converting to time units. Then the chance of something bad happening does exist.
+Hugo Le Dirach
+2:20 PM
+
+Okay, I don't think their are operation involving time as a double.
+  2:20 PM
+
+The investigation carries on :magnifying_glass:
+Tom Henderson
+4:00 PM
+
+    Request for comments and suggestions on this figure regarding the WifiPhy behavior in a simple scenario
+
+Is this the result of actual simulation output or just an artist's conception that you are asking for improvements on?
+Hugo Le Dirach
+4:04 PM
+
+artist conception on what I understand of the mechanism
+  4:05 PM
+
+It is far from what I intend to have, I would like to have a timeline with function call impacting the state and current event
+  4:11 PM
+
+I believe the bug is unlikely to be an error on one line in the code but rather a combination of small subtle edge cases in cascade that allow a specific miss to occur, I trust I have to understand the wifi-phy module to find the issue
+  4:11 PM
+
+and while doing that, might as well make good visuals to improve documentation
+Tom Henderson
+4:40 PM
+
+The 802.11-2020 specification has several figures of this nature, which might be good to refer to. I recommend chapter 10 on the MAC behavior (several informative figures) and chapter 17 on the OFDM PHY (see in particular, Figure 17-19, which relates to the states that the WifiPhyStateHelper should be in). If you search for 'how to download IEEE 802.11-2020" you can find instructions on how to obtain a free copy of the standard.
+Hugo Le Dirach
+4:42 PM
+
+Got it, thank you !
+Hugo Le Dirach
+10:55 AM
+
+@Tom Henderson thank you for the recommendation of this document, figure 17.20 was exactly what I was looking for
+  10:57 AM
+
+In the wifi-phy.cc (line 1924, ns-3.46.1) there is this line :
+
+    m_endTxEvent =
+        Simulator::Schedule(txDuration, &WifiPhy::TxDone, this, psdus); // TODO: fix for MU
+
+What does MU refers to ? Is there a active issue on this subject ?
+  10:57 AM
+
+Is it MU-MIMO ?
+Tom Henderson
+6:28 PM
+
+    Is it MU-MIMO ?
+
+Probably (@Sébastien Deronne would know for sure).
+
