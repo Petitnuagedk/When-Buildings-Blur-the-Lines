@@ -83,7 +83,7 @@ int main() {
                 std::string nodesCsv     = "scratch/nodes_e" + std::to_string(epoch) + "_n" + nNodes + ".csv";
                 std::string buildingsCsv = "scratch/buildings_e" + std::to_string(epoch) + "_n" + nNodes + ".csv";
 
-                std::string pyCmd = "python " + layoutScript
+                std::string pyCmd = "python3 " + layoutScript
                                     + " --seed " + std::to_string(epoch)
                                     + " --nodes " + nNodes
                                     + " --cell 65 --bsize 35 --spacing 20 --clearance 3"

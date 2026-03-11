@@ -618,16 +618,10 @@ void IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t int
 }
 
 void IpPacketDropCallback(const Ipv4Header &header, Ptr< const Packet > packet, Ipv4L3Protocol::DropReason reason, Ptr< Ipv4 > ipv4, uint32_t interface) {
-    // Make a copy of the packet to extract headers
+    // The Ipv4Header is already provided as 'header'; the packet contains only the L4+ payload.
     Ptr<Packet> packetCopy = packet->Copy();
 
-    Ipv4Header ipv4Header;
     UdpHeader udpHeader;
-
-    // Extract IPv4 header
-    packetCopy->RemoveHeader(ipv4Header);
-    // Ipv4Address source = ipv4Header.GetSource();
-    // Ipv4Address destination = ipv4Header.GetDestination();
 
     // Check for UDP header
     if (!packetCopy->PeekHeader(udpHeader)) {
