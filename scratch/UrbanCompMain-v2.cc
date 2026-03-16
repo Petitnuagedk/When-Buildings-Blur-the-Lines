@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <functional>
 #include <atomic>
+//g++ -std=c++17 -pthread -o UrbanCompMain-v2 scratch/UrbanCompMain-v2.cc
 
 namespace fs = std::filesystem;
 

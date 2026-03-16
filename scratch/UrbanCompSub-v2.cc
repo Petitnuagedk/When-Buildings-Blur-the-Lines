@@ -148,6 +148,9 @@ const uint16_t AODV_PORT = 654;
 const uint16_t OLSR_PORT = 698;
 const uint16_t DSDV_PORT = 269;
 
+// Global routing algorithm string, set from main() before simulation runs
+std::string g_routingAlgorithm = "aodv";
+
 
 void PrintSimulationTime() {
     double currentTime = Simulator::Now().GetSeconds();
@@ -384,13 +387,18 @@ void TxTraceWithAddresses(Ptr<const Packet> packet, const Address &from, const A
 void IpPacketReceivedCallback(Ptr<const Packet> packet, Ptr<Ipv4> to, uint32_t interface) {
     // Make a copy of the packet to extract headers
     Ptr<Packet> packetCopy = packet->Copy();
-    // std::cout << packet->ToString() << std::endl;
 
     Ipv4Header ipv4Header;
     UdpHeader udpHeader;
 
     // Extract IPv4 header
     packetCopy->RemoveHeader(ipv4Header);
+
+    // Skip non-UDP or truncated fragments that lack a full UDP header.
+    if (ipv4Header.GetProtocol() != 17 || packetCopy->GetSize() < 8) {
+        return;
+    }
+
     Ipv4Address source = ipv4Header.GetSource();
     Ipv4Address destination = ipv4Header.GetDestination();
 
@@ -405,52 +413,50 @@ void IpPacketReceivedCallback(Ptr<const Packet> packet, Ptr<Ipv4> to, uint32_t i
     // Check if destination port is 4000
     if (destinationPort != 4000)
     {
-        //std::cout << packetCopy->ToString() << std::endl;
-        networkLevelTraffic.RouteSignalizationPacketsReceived++; // Increment route signalization packets received
-        // possibly routing packet
-        ns3::aodv::TypeHeader typeHeader;
-        if (!packetCopy->PeekHeader(typeHeader))
+        networkLevelTraffic.RouteSignalizationPacketsReceived++;
+        // Only parse AODV-specific headers when using AODV
+        if (g_routingAlgorithm == "aodv" && packetCopy->GetSize() >= 1)
         {
-            return;
-        }
-        packetCopy->RemoveHeader(typeHeader);
-        
-        // TYPES : 1 --> RREQ, 2--> RREP, 3--> RERR, 4--> RREP_ACK
-        if (typeHeader.Get() == 2)
-        {
-            ns3::aodv::RrepHeader rrepHeader;
-            if (!packetCopy->PeekHeader(rrepHeader))
-            {
-                std::cout << "not suppose to be here : there is a typeHeader, but no RREP header" << std::endl;
-                std::exit(1);
-            }
-            packetCopy->RemoveHeader(rrepHeader);
-            Ipv4Address OriginIP = rrepHeader.GetOrigin();
-            // Check if the adress of the packet matches the destination address of the node that fire the callback
-            if (to->GetAddress(interface, 0).GetLocal() != OriginIP)
+            ns3::aodv::TypeHeader typeHeader;
+            if (!packetCopy->PeekHeader(typeHeader))
             {
                 return;
             }
-
-            Ipv4Address DestinationIP = rrepHeader.GetDst();
-            std::tuple<Ipv4Address, Ipv4Address, uint16_t> targetRoutePrint = {OriginIP, DestinationIP, rrepHeader.GetDstSeqno()};
-
-            // Check if the Route exists in RoutingPerfInfoMap
-            auto it = std::find_if(RoutingPerfInfoMap.begin(), RoutingPerfInfoMap.end(),
-                [&targetRoutePrint](const auto& entry) {
-                    const auto& currentRoutePrint = entry.second.RoutePrint;
-                    return std::get<0>(currentRoutePrint) == std::get<0>(targetRoutePrint) &&  // origin
-                        std::get<1>(currentRoutePrint) == std::get<1>(targetRoutePrint) &&  // destination
-                        std::get<2>(currentRoutePrint) <= std::get<2>(targetRoutePrint);    // sequence number
-                });
+            packetCopy->RemoveHeader(typeHeader);
             
-            if (it != RoutingPerfInfoMap.end())
+            // TYPES : 1 --> RREQ, 2--> RREP, 3--> RERR, 4--> RREP_ACK
+            if (typeHeader.Get() == 2 && packetCopy->GetSize() >= 19)
             {
-                // Update the existing RoutingPerfInfo object
-                RoutingPerfInfo& existingRoute = it->second;
-                existingRoute.TimeRREP = Simulator::Now().GetSeconds();
-                existingRoute.hopCount = rrepHeader.GetHopCount();
-                existingRoute.routeFound = true;
+                ns3::aodv::RrepHeader rrepHeader;
+                if (!packetCopy->PeekHeader(rrepHeader))
+                {
+                    return;
+                }
+                packetCopy->RemoveHeader(rrepHeader);
+                Ipv4Address OriginIP = rrepHeader.GetOrigin();
+                if (to->GetAddress(interface, 0).GetLocal() != OriginIP)
+                {
+                    return;
+                }
+
+                Ipv4Address DestinationIP = rrepHeader.GetDst();
+                std::tuple<Ipv4Address, Ipv4Address, uint16_t> targetRoutePrint = {OriginIP, DestinationIP, rrepHeader.GetDstSeqno()};
+
+                auto it = std::find_if(RoutingPerfInfoMap.begin(), RoutingPerfInfoMap.end(),
+                    [&targetRoutePrint](const auto& entry) {
+                        const auto& currentRoutePrint = entry.second.RoutePrint;
+                        return std::get<0>(currentRoutePrint) == std::get<0>(targetRoutePrint) &&
+                            std::get<1>(currentRoutePrint) == std::get<1>(targetRoutePrint) &&
+                            std::get<2>(currentRoutePrint) <= std::get<2>(targetRoutePrint);
+                    });
+                
+                if (it != RoutingPerfInfoMap.end())
+                {
+                    RoutingPerfInfo& existingRoute = it->second;
+                    existingRoute.TimeRREP = Simulator::Now().GetSeconds();
+                    existingRoute.hopCount = rrepHeader.GetHopCount();
+                    existingRoute.routeFound = true;
+                }
             }
         }
         return;
@@ -509,6 +515,12 @@ void IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t int
 
     // Extract IPv4 header
     packetCopy->RemoveHeader(ipv4Header);
+
+    // Non-first IP fragments don't carry a UDP header; skip them.
+    if (ipv4Header.GetProtocol() != 17 || packetCopy->GetSize() < 8) {
+        return;
+    }
+
     Ipv4Address source = ipv4Header.GetSource();
     Ipv4Address destination = ipv4Header.GetDestination();
 
@@ -525,41 +537,38 @@ void IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t int
     // Check if destination port is 4000
     if (destinationPort != 4000)
     {
-        networkLevelTraffic.RouteSignalizationPacketsSent++; // Increment route signalization packets received
-        // possibly routing packet
-        ns3::aodv::TypeHeader typeHeader;
-        if (!packetCopy->PeekHeader(typeHeader))
+        networkLevelTraffic.RouteSignalizationPacketsSent++;
+        // Only parse AODV-specific headers when using AODV
+        if (g_routingAlgorithm == "aodv" && packetCopy->GetSize() >= 1)
         {
-            return;
-        }
-        packetCopy->RemoveHeader(typeHeader);
-        
-        // TYPES : 1 --> RREQ, 2--> RREP, 3--> RERR, 4--> RREP_ACK
-        if (typeHeader.Get() == 1)
-        {
-            ns3::aodv::RreqHeader rreqHeader;
-            if (packetCopy->PeekHeader(rreqHeader))
+            ns3::aodv::TypeHeader typeHeader;
+            if (!packetCopy->PeekHeader(typeHeader))
             {
-                packetCopy->RemoveHeader(rreqHeader);
-                // RREQ is being sent
-                if (rreqHeader.GetHopCount() == 0)
+                return;
+            }
+            packetCopy->RemoveHeader(typeHeader);
+            
+            // TYPES : 1 --> RREQ, 2--> RREP, 3--> RERR, 4--> RREP_ACK
+            if (typeHeader.Get() == 1 && packetCopy->GetSize() >= 23)
+            {
+                ns3::aodv::RreqHeader rreqHeader;
+                if (packetCopy->PeekHeader(rreqHeader))
                 {
-                    // Create a new RoutingPerfInfo object
-                    RoutingPerfInfo routingInfo;
-                    uint16_t RouteId = RoutingPerfInfoMap.size();
-                    routingInfo.RoutePrint = {rreqHeader.GetOrigin(), rreqHeader.GetDst(), rreqHeader.GetDstSeqno()};
-                    routingInfo.RREQId = rreqHeader.GetId();
-                    routingInfo.SourceIP = rreqHeader.GetOrigin();
-                    routingInfo.DestinationIP = rreqHeader.GetDst();
-                    routingInfo.hopCount = rreqHeader.GetHopCount();
-                    routingInfo.TimeRREQ = Simulator::Now().GetSeconds();
-
-                    // Add it to the map
-                    RoutingPerfInfoMap[RouteId] = routingInfo;
+                    packetCopy->RemoveHeader(rreqHeader);
+                    if (rreqHeader.GetHopCount() == 0)
+                    {
+                        RoutingPerfInfo routingInfo;
+                        uint16_t RouteId = RoutingPerfInfoMap.size();
+                        routingInfo.RoutePrint = {rreqHeader.GetOrigin(), rreqHeader.GetDst(), rreqHeader.GetDstSeqno()};
+                        routingInfo.RREQId = rreqHeader.GetId();
+                        routingInfo.SourceIP = rreqHeader.GetOrigin();
+                        routingInfo.DestinationIP = rreqHeader.GetDst();
+                        routingInfo.hopCount = rreqHeader.GetHopCount();
+                        routingInfo.TimeRREQ = Simulator::Now().GetSeconds();
+                        RoutingPerfInfoMap[RouteId] = routingInfo;
+                    }
                 }
-                // RREQ is being forwarded (we don't care)
-            } 
-            // not suppose to be here : there is a typeHeader, but no RREQ header
+            }
         }
         return;
     }
@@ -619,6 +628,11 @@ void IpPacketSentCallback(Ptr<const Packet> packet, Ptr<Ipv4> from, uint32_t int
 
 void IpPacketDropCallback(const Ipv4Header &header, Ptr< const Packet > packet, Ipv4L3Protocol::DropReason reason, Ptr< Ipv4 > ipv4, uint32_t interface) {
     // The Ipv4Header is already provided as 'header'; the packet contains only the L4+ payload.
+    // Fragments or tiny packets may not contain a full UDP header (8 bytes); bail out early.
+    if (header.GetProtocol() != 17 || packet->GetSize() < 8) {
+        return; // Not UDP or too small (e.g. incomplete fragment)
+    }
+
     Ptr<Packet> packetCopy = packet->Copy();
 
     UdpHeader udpHeader;
@@ -846,6 +860,8 @@ int main (int argc, char *argv[])
 
     cmd.Parse (argc, argv);
 
+    g_routingAlgorithm = RA; // make RA available to trace callbacks
+
     if (numSource > numNodes)
     {
         std::cout << "Warning: numSource is greater than numNodes. "
@@ -1028,9 +1044,15 @@ int main (int argc, char *argv[])
     }
     
 
-    // Assign IP addresses
+    // Assign IP addresses.  Default /24 supports only 254 hosts; if numNodes exceeds that,
+    // switch to a /16 network to prevent overflow.
     Ipv4AddressHelper address;
-    address.SetBase("10.1.1.0", "255.255.255.0");
+    if (numNodes <= 254) {
+        address.SetBase("10.1.1.0", "255.255.255.0");
+    } else {
+        // use a /16 network so we can assign up to 65534 addresses
+        address.SetBase("10.1.0.0", "255.255.0.0");
+    }
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
     // Populate the nodeInfoMap with NodeID and NodeIP
