@@ -28,8 +28,8 @@ def run(cmd, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description="Run UrbanCompConnectivity-v2 for multiple epochs and node counts")
-    parser.add_argument("--epochs", type=int, nargs="*", default=list(range(1, 11)),
-                        help="Epoch numbers to run (default: 1..10)")
+    parser.add_argument("--epochs", type=int, nargs="*", default=[0],
+                        help="Epoch numbers to run (default: 0)")
     parser.add_argument("--nodes", type=int, nargs="*", default=[50, 100, 150, 200, 300, 500],
                         help="Node counts to run (default: 50 100 150 200 300 500)")
     parser.add_argument("--loss-model", default="FOBA", help="Propagation loss model (default: FOBA)")
@@ -50,7 +50,7 @@ def main():
         sys.exit(1)
 
     if args.build_first:
-        build_cmd = [str(ns3_runner), "build", "scratch/UrbanCompConnectivity-v2.cc"]
+        build_cmd = [str(ns3_runner), "build", "scratch/UrbanCompConnectivity-v3.cc"]
         run(build_cmd)
 
     for epoch in args.epochs:
