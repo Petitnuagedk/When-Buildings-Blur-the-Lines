@@ -42,6 +42,7 @@
 #include <iostream>
 #include <filesystem>
 #include <random>
+#include <chrono>
 
 using namespace ns3;
 namespace py = pybind11;
@@ -166,7 +167,7 @@ struct ComputeSnrParams
 };
 
 // flag enabling/disabling periodic SNR computation (tuneable via CLI)
-static bool g_enableSnr = true;
+static bool g_enableSnr = false;
 
 
 // per‑level traffic counters
@@ -649,11 +650,11 @@ main(int argc, char* argv[])
     bool verbose = true;    // enable verbose logging
     bool probeVerbose = false; // print probe send/receive messages (will be copied to g_probeVerbose)
     bool enableSnr = false;    // whether to perform periodic SNR computations
-    std::string resultPath = "."; // directory where metrics will be written
+    std::string resultPath = "sionna-test"; // directory where metrics will be written
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
-    std::string SceneFile = "scratch/layout.xml"; // Mitsuba scene XML file (relative or absolute path)
-    std::string LayoutFile = "scratch/UrbanCompLayout.csv"; // CSV with node positions
+    std::string SceneFile = "scratch/scene_wifi253.xml"; // Mitsuba scene XML file (relative or absolute path)
+    std::string LayoutFile = "scratch/nodes.csv"; // CSV with node positions
     int numSource = 6; // default number of source nodes for traffic
     std::string routing = "olsr"; // routing protocol: olsr or aodv
     int maxNodes = 10; // override number of nodes created (<=0 = use all positions)
@@ -663,7 +664,7 @@ main(int argc, char* argv[])
     bool enableGnbDualPolarized = true; // enable dual-polarized elements at gNB
     bool enableUeDualPolarized = true;  // enable dual-polarized elements at UE
 
-    bool IsImageRenderedEnabled = true;               // enable rendering of scene images to file
+    bool IsImageRenderedEnabled = false;               // enable rendering of scene images to file
     Vector CameraPosition(Vector(70.0, -20.0, 190.0)); // Camera position
     Vector CameraLookAt(Vector(0.0, 0.0, 4.0));        // Camera look-at point
     std::string filename = "sionna-rt-scene3-";        // output file name for scene images
@@ -746,14 +747,17 @@ main(int argc, char* argv[])
         std::filesystem::create_directories(resultPath);
     }
 
-    // after parsing, verify scene file / output directory (user may have overridden defaults)
-    bool haveSceneFile = !SceneFile.empty() && std::filesystem::exists(SceneFile);
-    if (!haveSceneFile) {
-        if (!SceneFile.empty()) {
-            std::cout << "Warning: scene file '" << SceneFile << "' not found, disabling image rendering.\n";
-        }
-        IsImageRenderedEnabled = false;
+    // after parsing, verify that the custom Mitsuba XML exists.
+    // We do not fall back to a built-in "scenario" when the XML is missing.
+    if (SceneFile.empty()) {
+        std::cerr << "Error: SceneFile is empty. Please provide a valid Mitsuba XML file via --SceneFile.\n";
+        return 1;
     }
+    if (!std::filesystem::exists(SceneFile)) {
+        std::cerr << "Error: scene file '" << SceneFile << "' not found. Exiting.\n";
+        return 1;
+    }
+
     if (!std::filesystem::exists(filedirectory)) {
         std::cout << "Output directory '" << filedirectory << "' does not exist, creating it.\n";
         std::error_code ec;
@@ -779,13 +783,8 @@ main(int argc, char* argv[])
     // create and configure the Sionna-RT spectrum propagation loss model
     m_spectrumLossModel = CreateObject<SionnaRtSpectrumPropagationLossModel>();
     m_spectrumLossModel->SetChannelModelAttribute("Frequency", DoubleValue(frequency));
-    // If a Mitsuba scene XML file is provided, pass it to the channel model
-    if (haveSceneFile) {
-        m_spectrumLossModel->SetChannelModelAttribute("SceneFile", StringValue(SceneFile));
-    } else {
-        std::cout << "No valid scene file provided, Sionna RT will use pre made scenario '" << Scenario << "'.\n";
-        m_spectrumLossModel->SetChannelModelAttribute("Scenario", StringValue(Scenario));
-    }
+    // Provide the Mitsuba scene XML file to the channel model.
+    m_spectrumLossModel->SetChannelModelAttribute("SceneFile", StringValue(SceneFile));
 
     // enable image rendering and set output filenames/paths if desired
     m_spectrumLossModel->SetChannelModelAttribute(
@@ -1088,7 +1087,7 @@ main(int argc, char* argv[])
     // compute global stop time and install it
     g_simStopTime = endTime + 5.0;
     std::cout << "[info] simulation will stop at " << g_simStopTime << " seconds" << std::endl;
-    Simulator::Schedule(Seconds(0), &LogSimTime);
+    // Simulator::Schedule(Seconds(0), &LogSimTime);
     Simulator::Stop(Seconds(g_simStopTime));
 
     // check SNR scheduling boundaries
@@ -1103,6 +1102,8 @@ main(int argc, char* argv[])
         }
     }
 
+    auto simStartTime = std::chrono::steady_clock::now();
+
     try {
         Simulator::Run();
     }
@@ -1112,6 +1113,10 @@ main(int argc, char* argv[])
         Simulator::Destroy();
         return 1;
     }
+
+    auto simEndTime = std::chrono::steady_clock::now();
+    auto simDuration = std::chrono::duration<double>(simEndTime - simStartTime).count();
+    std::cout << "[info] ns-3 simulation runtime: " << simDuration << " seconds" << std::endl;
 
     // write collected traffic metrics after simulation finishes
     WriteAllMetricsToCsv(resultPath);

@@ -470,14 +470,12 @@ PhyEntity::StartReceivePreamble(Ptr<const WifiPpdu> ppdu,
         /*
         * When CCA_BUSY expires at the exact same simulation time as a new PPDU arrival,
         * GetState() returns IDLE (strict >) while m_currentEvent may still be set from an
-        * in-progress preamble reception chain. This also covers the case where a PHY header
-        * field ended with IGNORE action (no CCA extension, but m_currentEvent remains set
-        * until ResetReceive fires at PPDU end). Fall through to handle both states identically.
+        * in-progress preamble reception chain. Fall through to handle both states identically.
         */
     case WifiPhyState::IDLE:
         NS_ASSERT_MSG((m_state->GetState() != WifiPhyState::IDLE) || !m_wifiPhy->m_currentEvent ||
-                          (m_wifiPhy->m_currentEvent->GetEndTime() >= Simulator::Now()),
-                      "IDLE with stale m_currentEvent whose PPDU end time is in the past");
+                          (m_state->GetLastTime({WifiPhyState::CCA_BUSY}) == Simulator::Now()),
+                      "IDLE with non-null m_currentEvent but CCA_BUSY did not just end");
         if (m_wifiPhy->m_currentEvent)
         {
             if (m_wifiPhy->m_frameCaptureModel &&
