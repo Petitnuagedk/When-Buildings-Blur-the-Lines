@@ -40,7 +40,7 @@ def compute_95ci_halfwidth(values):
 # Location where the simulation output is stored (as produced by UrbanCompMain-v2.cc)
 # This script is in plot_scripts/, so we resolve the data directory relative to it.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "data", "UrbanRaCompDir-v2"))
+source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-v2"))
 
 # --- CLI ---
 parser = argparse.ArgumentParser(description="Plot urban comp metrics across epochs")
@@ -73,7 +73,7 @@ if args.epochs is not None:
     BASE_DIRS = BASE_DIRS[: args.epochs]
 
 # === Plotting ===
-PLOTS_DIR = os.path.join("plots-v2")
+PLOTS_DIR = os.path.join("plots-v2-f")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 loss_models = ["FOBA", "Friis", "TwoRayGroundPropagationLossModel", "ItuR1411LosPropagationLossModel"]

@@ -866,19 +866,12 @@ main(int argc, char* argv[])
     NodeContainer nodes;
     nodes.Create(nNodes);
 
-    // Configure a spectrum channel that supports multiple spectrum models
-    // (needed by SpectrumWifiPhy which uses its own Wi-Fi spectrum model).
+    // Configure a spectrum channel that supports multiple spectrum models (Wi-Fi
+    // spectrum and Sionna phased-array model).
     Ptr<MultiModelSpectrumChannel> channel = CreateObject<MultiModelSpectrumChannel>();
     channel->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
-    // SionnaRtSpectrumPropagationLossModel derives from
-    // PhasedArraySpectrumPropagationLossModel, which SpectrumWifiPhy cannot
-    // satisfy (it has no PhasedArrayModel slot).  The wrapper adapts the
-    // interface: it holds one stable UniformPlanarArray per directed link so
-    // SionnaRtChannelModel's internal m_channelMatrixMap cache (keyed on
-    // antenna ID) gets hits on every call within the UpdatePeriod window.
-    Ptr<SionnaSpectrumWrapper> wrapper = CreateObject<SionnaSpectrumWrapper>();
-    wrapper->SetSionnaModel(m_spectrumLossModel);
-    channel->AddSpectrumPropagationLossModel(wrapper);
+    // Install Sionna RT as native phased-array spectrum propagation loss model.
+    channel->AddPhasedArraySpectrumPropagationLossModel(m_spectrumLossModel);
 
     // Use Spectrum‑based Wi‑Fi PHY so the underlying channel is a SpectrumChannel
     SpectrumWifiPhyHelper wifiPhy; // = SpectrumWifiPhyHelper::Default();
@@ -928,6 +921,30 @@ main(int argc, char* argv[])
     address.SetBase("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
+    // Install per-phy phased-array antennas so SionnaRtSpectrumPropagationLossModel
+    // (m_phasedArraySpectrumPropagationLoss) can be invoked with valid Antenna models.
+    PhasedArrayModel::ComplexVector defaultBeam(1);
+    defaultBeam[0] = std::complex<double>(1.0, 0.0);
+
+    for (uint32_t i = 0; i < devices.GetN(); ++i)
+    {
+        Ptr<WifiNetDevice> wifiDev = DynamicCast<WifiNetDevice>(devices.Get(i));
+        if (!wifiDev)
+        {
+            continue;
+        }
+        Ptr<SpectrumWifiPhy> spectrumPhy = DynamicCast<SpectrumWifiPhy>(wifiDev->GetPhy());
+        if (!spectrumPhy)
+        {
+            continue;
+        }
+
+        Ptr<UniformPlanarArray> phyAntenna = CreateObjectWithAttributes<UniformPlanarArray>(
+            "NumColumns", UintegerValue(1),
+            "NumRows", UintegerValue(1));
+        phyAntenna->SetBeamformingVector(defaultBeam);
+        spectrumPhy->SetAntenna(phyAntenna);
+    }
 
     // --- connectivity addition ---
     g_ifaces = interfaces;
@@ -979,33 +996,8 @@ main(int argc, char* argv[])
         nodes.Get(i)->GetObject<MobilityModel>()->SetPosition(positions[i]);
     }
 
-    // Pre-register all directed link antenna pairs in the wrapper cache.
-    // This allocates one stable UniformPlanarArray per (tx, rx) pair before
-    // any packet is sent.  Because SionnaRtChannelModel keys its internal
-    // m_channelMatrixMap on antenna object IDs, reusing the same objects on
-    // every call guarantees cache hits within the UpdatePeriod window and
-    // avoids redundant PathSolver invocations for every WiFi packet event.
-    {
-        PhasedArrayModel::ComplexVector w(1);
-        w[0] = std::complex<double>(1.0, 0.0);
-        for (uint32_t i = 0; i < nodes.GetN(); ++i)
-        {
-            for (uint32_t j = 0; j < nodes.GetN(); ++j)
-            {
-                if (i == j) continue;
-                auto txAnt = CreateObjectWithAttributes<UniformPlanarArray>(
-                    "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
-                txAnt->SetBeamformingVector(w);
-                auto rxAnt = CreateObjectWithAttributes<UniformPlanarArray>(
-                    "NumColumns", UintegerValue(1), "NumRows", UintegerValue(1));
-                rxAnt->SetBeamformingVector(w);
-                wrapper->PreRegisterLink(
-                    nodes.Get(i)->GetObject<MobilityModel>(),
-                    nodes.Get(j)->GetObject<MobilityModel>(),
-                    txAnt, rxAnt);
-            }
-        }
-    }
+    // For native phased-array propagation model we rely on SpectrumPhy->GetAntenna()
+    // made available by setting the antenna per-SpectrumWifiPhy above.
 
     // select devices 0 and 1 as tx/rx for Sionna SNR computation
     Ptr<NetDevice> txDev = devices.Get(0);
@@ -1063,6 +1055,20 @@ main(int argc, char* argv[])
     if (enableUeDualPolarized) {
         rxAntenna->SetAttribute("IsDualPolarized", BooleanValue(true));
     }
+
+    // assign these phased array antenna objects to the TX/RX SpectrumWifiPhy,
+    // so MultiModelSpectrumChannel::StartRx can find them through the PHYs
+    if (Ptr<WifiNetDevice> txWifi = DynamicCast<WifiNetDevice>(txDev)) {
+        if (Ptr<SpectrumWifiPhy> txPhy = DynamicCast<SpectrumWifiPhy>(txWifi->GetPhy())) {
+            txPhy->SetAntenna(txAntenna);
+        }
+    }
+    if (Ptr<WifiNetDevice> rxWifi = DynamicCast<WifiNetDevice>(rxDev)) {
+        if (Ptr<SpectrumWifiPhy> rxPhy = DynamicCast<SpectrumWifiPhy>(rxWifi->GetPhy())) {
+            rxPhy->SetAntenna(rxAntenna);
+        }
+    }
+
     // set the beamforming vectors
     DoBeamforming(txDev, txAntenna, rxDev);
     DoBeamforming(rxDev, rxAntenna, txDev);

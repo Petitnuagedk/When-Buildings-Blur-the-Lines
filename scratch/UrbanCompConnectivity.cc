@@ -235,7 +235,7 @@ void printPointsInsideBuildings(const std::vector<std::pair<double, double>>& po
     }
 }
 
-std::ofstream mobilityLog("mobility.csv", std::ios::app); // Open in append mode
+std::ofstream mobilityLog; // Opened in main() after resultPath is known
 
 void
 printmob(NodeContainer nodes)
@@ -264,7 +264,7 @@ int main (int argc, char *argv[])
     int numBuildings = -1;
     double ratioSource = 0.1; // % of source per Node in the network. number of source is the same as numebr of sink
     double transmissionRate = 50;
-    std::string resultPath = "";
+    std::string resultPath = "connectivity-results-SA-FOBA";
     bool verbose = false;
     std::string lossModel = "FOBA"; //FOBA Friis Nakagami LogDistancePropagationLossModel TwoRayGroundPropagationLossModel
 
@@ -278,6 +278,10 @@ int main (int argc, char *argv[])
     cmd.AddValue("lossModel", "Loss model to use", lossModel);
 
     cmd.Parse (argc, argv);
+
+    // Create output directory and open mobility log inside it
+    std::filesystem::create_directories(resultPath);
+    mobilityLog.open(resultPath + "/mobility.csv", std::ios::app);
 
     double EndTime = 300; // To modify to 3600 (s)
 
@@ -357,10 +361,10 @@ int main (int argc, char *argv[])
         //std::cout << "setting up loss model : " << lossModel << std::endl;
         wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
     }
-    else if (lossModel == "Nakagami")
+    else if (lossModel == "ItuR1411LosPropagationLossModel")
     {
         //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::NakagamiPropagationLossModel");
+        wifiChannel.AddPropagationLoss("ns3::ItuR1411LosPropagationLossModel");
     }
     else if (lossModel == "LogDistancePropagationLossModel")
     {
@@ -446,7 +450,7 @@ int main (int argc, char *argv[])
 
     Simulator::Destroy ();
 
-    std::ofstream connectivityFile("connectivity_matrices.csv");
+    std::ofstream connectivityFile(resultPath + "/connectivity_matrices.csv");
     for (const auto& matrix : TimereceivedProbes) {
         for (const auto& row : matrix) {
             for (const auto& value : row) {
@@ -458,7 +462,7 @@ int main (int argc, char *argv[])
     }
     connectivityFile.close();
 
-    std::ofstream positionsFile("node_positions.csv");
+    std::ofstream positionsFile(resultPath + "/node_positions.csv");
     for (const auto& frame : nodePositions) {
         for (const auto& pos : frame) {
             positionsFile << std::get<0>(pos) << "," << std::get<1>(pos) << "," << std::get<2>(pos) << "\n";
@@ -471,8 +475,7 @@ int main (int argc, char *argv[])
     {
         std::cout << "Random2Dwalk simulation in urban setting with " + lossModel + " ended successfully" << "\n";
     }
-    system("python mob_con.py");
-    
+   
 }
 
 

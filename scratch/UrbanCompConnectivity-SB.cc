@@ -45,11 +45,13 @@ using namespace ns3;
 
 //NS_LOG_COMPONENT_DEFINE("LOG_LEVEL_DEBUG");
 
-// Global vector to track received probe counts
+// Global connectivity state
 std::vector<std::vector<uint32_t>> receivedProbes;
 std::vector<std::vector<std::vector<uint32_t>>> TimereceivedProbes;
 std::vector<std::vector<std::tuple<double, double, double>>> nodePositions;
-Ipv4InterfaceContainer globalInterfaces;
+
+// Global propagation loss model pointer (used for direct loss-based connectivity check)
+Ptr<PropagationLossModel> globalLossModel;
 
 void RecordNodePositions(NodeContainer nodes) {
     std::vector<std::tuple<double, double, double>> currentPositions;
@@ -67,66 +69,40 @@ void SchedulePositionRecording(NodeContainer nodes) {
     Simulator::Schedule(Seconds(1.0), &SchedulePositionRecording, nodes);
 }
 
-void ReceiveProbe(Ptr<Socket> socket)
+// (ReceiveProbe removed: connectivity is now determined by direct loss computation)
+
+/**
+ * MeasureConnectivity – called every second.
+ * For each ordered pair (i, j) with i != j, the received power is computed
+ * from the configured propagation loss model.  If it meets or exceeds
+ * rxThresholdDbm the link is considered up (1), otherwise down (0).
+ * The resulting matrix is appended to TimereceivedProbes.
+ */
+void MeasureConnectivity(NodeContainer nodes, double txPowerDbm, double rxThresholdDbm)
 {
-    Ptr<Packet> packet;
-    Address from;
-    while ((packet = socket->RecvFrom(from)))
-    {
-        InetSocketAddress address = InetSocketAddress::ConvertFrom(from);
-        Ipv4Address senderAddress = address.GetIpv4();
+    uint32_t n = nodes.GetN();
 
-        uint32_t senderId = -1;
-        for (uint32_t i = 0; i < globalInterfaces.GetN(); ++i)
-        {
-            if (globalInterfaces.GetAddress(i) == senderAddress)
-            {
-                senderId = i;
-                break;
-            }
-        }
-
-        if (senderId != (uint32_t)-1)
-        {
-            Ptr<Node> receiver = socket->GetNode();
-            uint32_t receiverId = receiver->GetId();
-            receivedProbes[senderId][receiverId] = 1;
-        }
-    }
-
-}
-
-//int count = 0;
-void SendProbes(Ptr<Node> sender, Ipv4InterfaceContainer interfaces) {
-    uint32_t senderId = sender->GetId();
-
-    if (senderId==0)
-    {
-        //std::cout << count++ << "\n";
-        // Append the current connectivity matrix to TimereceivedProbes
-        TimereceivedProbes.push_back(receivedProbes);
-    }
-
-    // Reset receivedProbes for the current time frame
+    // Recompute matrix from scratch
     for (auto& row : receivedProbes) {
         std::fill(row.begin(), row.end(), 0);
     }
 
-    for (uint32_t j = 0; j < interfaces.GetN(); ++j) {
-        if (senderId == j) continue;  // skip self
-
-        Ptr<Socket> sendSocket = Socket::CreateSocket(sender, UdpSocketFactory::GetTypeId());
-        InetSocketAddress dest = InetSocketAddress(interfaces.GetAddress(j), 9999);
-        sendSocket->Connect(dest);
-
-        Ptr<Packet> p = Create<Packet>((uint8_t*)&senderId, sizeof(senderId));
-        sendSocket->Send(p);
-        sendSocket->Close();
+    for (uint32_t i = 0; i < n; ++i) {
+        Ptr<MobilityModel> mobI = nodes.Get(i)->GetObject<MobilityModel>();
+        for (uint32_t j = 0; j < n; ++j) {
+            if (i == j) continue;
+            Ptr<MobilityModel> mobJ = nodes.Get(j)->GetObject<MobilityModel>();
+            double rxPower = globalLossModel->CalcRxPower(txPowerDbm, mobI, mobJ);
+            if (rxPower >= rxThresholdDbm) {
+                receivedProbes[i][j] = 1;
+            }
+        }
     }
 
-    // Schedule the next probe round
-    Simulator::Schedule(Seconds(1.0), &SendProbes, sender, interfaces);
+    // Snapshot current matrix
+    TimereceivedProbes.push_back(receivedProbes);
 
+    Simulator::Schedule(Seconds(1.0), &MeasureConnectivity, nodes, txPowerDbm, rxThresholdDbm);
 }
 
 // Read a CSV file of 2 columns (x,y) and append into `points`.
@@ -377,6 +353,8 @@ int main (int argc, char *argv[])
     std::string resultPath = "results-con";
     bool verbose = false;
     std::string lossModel = "FOBA"; //FOBA Friis Nakagami LogDistancePropagationLossModel TwoRayGroundPropagationLossModel
+    double txPowerDbm    = 16.0206; // Transmit power (dBm) used for loss-based link check
+    double rxThresholdDbm = -82.0;  // Receiver sensitivity (dBm); link is up if rxPower >= threshold
 
     // Layout file selection (buildings/nodes)
     std::string layoutDir = "scratch";
@@ -392,6 +370,8 @@ int main (int argc, char *argv[])
     cmd.AddValue("transmissionRate", "Transmission rate (kbps)", transmissionRate);
     cmd.AddValue("resultPath", "Path to store results", resultPath);
     cmd.AddValue("lossModel", "Loss model to use", lossModel);
+    cmd.AddValue("txPowerDbm", "Transmit power in dBm for loss-based connectivity check", txPowerDbm);
+    cmd.AddValue("rxThresholdDbm", "Receiver sensitivity threshold in dBm (link up if rxPower >= threshold)", rxThresholdDbm);
     cmd.AddValue("layoutDir", "Directory containing layout files (nodes/buildings)", layoutDir);
     cmd.AddValue("epoch", "Layout epoch (used with layoutDir)", layoutEpoch);
     cmd.AddValue("useEpochLayoutFiles", "Use epoch/node layout files instead of legacy single layout file", useEpochLayoutFiles);
@@ -526,74 +506,26 @@ int main (int argc, char *argv[])
     YansWifiPhyHelper wifiPhy;
     YansWifiChannelHelper wifiChannel;
 
-    if (lossModel == "FOBA")
-    {
-        //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::FirstOrderBuildingsAwarePropagationLossModel");
-    }
-    else if (lossModel == "Friis")
-    {
-        //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
-    }
-    else if (lossModel == "ItuR1411LosPropagationLossModel")
-    {
-        //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::ItuR1411LosPropagationLossModel");
-    }
-    else if (lossModel == "LogDistancePropagationLossModel")
-    {
-        //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::LogDistancePropagationLossModel");
-    }
-    else if (lossModel == "TwoRayGroundPropagationLossModel")
-    {
-        //std::cout << "setting up loss model : " << lossModel << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::TwoRayGroundPropagationLossModel");
-    }
-    else
-    {
-        //std::cout << "setting up loss model : Friis (default, check value of lossModel) " << std::endl;
-        wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
-    }    
+    // Map short names to full ns3 TypeIds
+    std::string lossTypeId;
+    if      (lossModel == "FOBA")                               lossTypeId = "ns3::FirstOrderBuildingsAwarePropagationLossModel";
+    else if (lossModel == "Friis")                              lossTypeId = "ns3::FriisPropagationLossModel";
+    else if (lossModel == "ItuR1411LosPropagationLossModel")    lossTypeId = "ns3::ItuR1411LosPropagationLossModel";
+    else if (lossModel == "LogDistancePropagationLossModel")    lossTypeId = "ns3::LogDistancePropagationLossModel";
+    else if (lossModel == "TwoRayGroundPropagationLossModel")   lossTypeId = "ns3::TwoRayGroundPropagationLossModel";
+    else                                                        lossTypeId = "ns3::FriisPropagationLossModel";
 
-    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    //wifiPhy.Set("TxPowerStart", DoubleValue(18.0));  // Starting transmission power (dBm)
-    //wifiPhy.Set("TxPowerEnd", DoubleValue(18.0));    // Ending transmission power (dBm)
-    wifiPhy.SetChannel(wifiChannel.Create());
-
-    WifiHelper wifi;
-    wifi.SetStandard(WIFI_STANDARD_80211g);
-    
-    WifiMacHelper wifiMac;
-    wifiMac.SetType("ns3::AdhocWifiMac"
-                    //"Ssid", SsidValue(ssid),
-                    //"QosSupported", BooleanValue(true)
-                    //"BeaconGeneration", BooleanValue(true),
-                    //"BeaconInterval", TimeValue(Seconds(0.1024))
-                    );
-    NetDeviceContainer devices;   // Container for network devices
-    devices = wifi.Install(wifiPhy, wifiMac, nodes);
-
-    // Assign IP addresses
-    InternetStackHelper stack;
-    stack.Install (nodes);
-    Ipv4AddressHelper address;
-
-    // When node count exceeds /24 host space (254 addresses), use a larger subnet
-    // to avoid Ipv4AddressHelper::NewAddress() overflow.
-    if (nodes.GetN() > 254)
+    // Use ObjectFactory (string-based) so no concrete class headers are needed.
+    // globalLossModel is used by MeasureConnectivity() for direct CalcRxPower() calls.
     {
-        address.SetBase("10.1.0.0", "255.255.0.0");
-        std::cout << "Using /16 network prefix for " << nodes.GetN() << " nodes to avoid address overflow.\n";
+        ObjectFactory factory;
+        factory.SetTypeId(lossTypeId);
+        globalLossModel = factory.Create()->GetObject<PropagationLossModel>();
     }
-    else
-    {
-        address.SetBase("10.1.1.0", "255.255.255.0");
-    }
+    wifiChannel.AddPropagationLoss(lossTypeId);
 
-    Ipv4InterfaceContainer interfaces = address.Assign(devices);
-    globalInterfaces = interfaces;
+    // WiFi device installation and IP stack are not needed:
+    // MeasureConnectivity() calls CalcRxPower() directly on MobilityModel pointers.
 
     receivedProbes.resize(nodes.GetN(), std::vector<uint32_t>(nodes.GetN(), 0));
     TimereceivedProbes.clear();
@@ -602,19 +534,8 @@ int main (int argc, char *argv[])
     Simulator::Schedule(Seconds(2.0), &SchedulePositionRecording, nodes);
 
 
-    for (uint32_t i = 0; i < nodes.GetN(); ++i)
-    {
-        Ptr<Node> node = nodes.Get(i);
-        Ptr<Socket> recvSocket = Socket::CreateSocket(node, UdpSocketFactory::GetTypeId());
-        InetSocketAddress local = InetSocketAddress(Ipv4Address::GetAny(), 9999);
-        recvSocket->Bind(local);
-        recvSocket->SetRecvCallback(MakeBoundCallback(&ReceiveProbe));
-    }
-    
-    for (uint32_t i = 0; i < nodes.GetN(); ++i)
-    {
-        Simulator::Schedule(Seconds(2.0), &SendProbes, nodes.Get(i), interfaces);
-    }
+    // Schedule direct loss-based connectivity measurement every second
+    Simulator::Schedule(Seconds(2.0), &MeasureConnectivity, nodes, txPowerDbm, rxThresholdDbm);
 
 
     if (verbose)

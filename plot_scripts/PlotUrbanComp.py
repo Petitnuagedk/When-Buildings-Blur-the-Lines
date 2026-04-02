@@ -4,8 +4,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # === Config ===
-source = "UrbanRaCompDir"
-BASE_DIRS = ["Epoch_1", "Epoch_2", "Epoch_3", "Epoch_4", "Epoch_5", "Epoch_6", "Epoch_7"] # , "Epoch_8", "Epoch_9", "Epoch_10"]
+# Location where the simulation output is stored.
+# This script is in plot_scripts/, so we resolve the data directory relative to it.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-f30"))
+BASE_DIRS = ["Epoch_1"] #, "Epoch_2", "Epoch_3", "Epoch_4", "Epoch_5", "Epoch_6", "Epoch_7"] # , "Epoch_8", "Epoch_9", "Epoch_10"]
 loss_models = ["FOBA", "Friis", "TwoRayGroundPropagationLossModel", "ItuR1411LosPropagationLossModel"] #,"Tuned-Friis (SL=2.5)"] 
 algorithms = ["aodv", "olsr", "dsdv"]
 num_nodes_list = [20, 30, 40, 50, 60, 70, 80, 90]
@@ -276,7 +279,7 @@ for lm in loss_models:
             stddev_route_acquisition[lm][i] = np.std(values)
 
 # === Plotting ===
-PLOTS_DIR = os.path.join("plots")
+PLOTS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "plots-f30"))
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 def plot_metric_by_loss_model(x_vals, metric_data, ylabel, title_prefix, xlabel, filename_prefix, yerr_data=None):
@@ -358,3 +361,5 @@ plot_metric_by_loss_model(num_nodes_list, average_metrics_across_epochs["eed_vs_
 plot_metric_by_loss_model(num_nodes_list, average_metrics_across_epochs["goodput_vs_nodes"], "Goodput (kb/s)", "Goodput vs. Number of Nodes", "Number of Nodes", "goodput_vs_nodes", yerr_data=average_metrics_std_across_epochs["goodput_vs_nodes"])
 plot_route_acquisition_time(num_nodes_list, average_route_acquisition, stddev_route_acquisition, "Route Acquisition Time (s)", "Route Acquisition Time vs Number of Nodes (AODV)", "Number of Nodes", "route_acquisition_time_aodv")
 plot_routing_overhead_min_max(num_nodes_list, average_routing_overhead, min_routing_overhead, max_routing_overhead, "Routing Overhead", "Routing Overhead vs Number of Nodes", "Number of Nodes", "routing_overhead")
+
+print("All plots generated and saved to:", PLOTS_DIR)
