@@ -654,7 +654,7 @@ main(int argc, char* argv[])
 
     std::string Scenario = "simple_street_canyon_with_cars"; // propagation scenario
     std::string SceneFile = "scratch/scene_wifi253.xml"; // Mitsuba scene XML file (relative or absolute path)
-    std::string LayoutFile = "scratch/nodes2.csv"; // CSV with node positions
+    std::string LayoutFile = "scratch/node2.csv"; // CSV with node positions
     int numSource = 6; // default number of source nodes for traffic
     std::string routing = "olsr"; // routing protocol: olsr or aodv
     int maxNodes = 10; // override number of nodes created (<=0 = use all positions)

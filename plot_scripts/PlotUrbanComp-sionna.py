@@ -247,6 +247,7 @@ for BASE_DIR in BASE_DIRS:
                     routing_overhead_across_epochs[BASE_DIR][algo].append(routing_overhead)
                 else:
                     print("Routing overhead extraction failed for", ro_csv, " most likely due to empty file")
+                    routing_overhead_across_epochs[BASE_DIR][algo].append(np.nan)  # keep index aligned
             else:
                 routing_overhead_across_epochs[BASE_DIR][algo].append(np.nan)
 
@@ -408,6 +409,20 @@ def plot_routing_overhead_min_max(x_vals, avg_data, min_data, max_data, ylabel, 
     plt.tight_layout()
     plt.savefig(os.path.join(PLOTS_DIR, f"{filename}.png"))
     plt.close()
+
+# === Diagnostic: Print averaged values to detect flat-line cause ===
+print(f"\nDiscovered num_nodes_list: {num_nodes_list}")
+print(f"Epochs used: {BASE_DIRS}")
+for algo in algorithms:
+    pdr_vals = average_metrics_across_epochs["pdr_vs_nodes"][algo]
+    eed_vals = average_metrics_across_epochs["eed_vs_nodes"][algo]
+    gp_vals  = average_metrics_across_epochs["goodput_vs_nodes"][algo]
+    ro_vals  = average_routing_overhead[algo]
+    print(f"\n[{algo.upper()}]")
+    print(f"  PDR     : {pdr_vals}")
+    print(f"  EED     : {eed_vals}")
+    print(f"  Goodput : {gp_vals}")
+    print(f"  Rout.OH : {ro_vals}")
 
 # === Final Plot Calls ===
 pdr_ylim = (0.0, 1.0)

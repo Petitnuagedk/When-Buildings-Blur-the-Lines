@@ -7,7 +7,7 @@ import numpy as np
 # Location where the simulation output is stored.
 # This script is in plot_scripts/, so we resolve the data directory relative to it.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-f30"))
+source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SA"))
 BASE_DIRS = ["Epoch_1"] #, "Epoch_2", "Epoch_3", "Epoch_4", "Epoch_5", "Epoch_6", "Epoch_7"] # , "Epoch_8", "Epoch_9", "Epoch_10"]
 loss_models = ["FOBA", "Friis", "TwoRayGroundPropagationLossModel", "ItuR1411LosPropagationLossModel"] #,"Tuned-Friis (SL=2.5)"] 
 algorithms = ["aodv", "olsr", "dsdv"]

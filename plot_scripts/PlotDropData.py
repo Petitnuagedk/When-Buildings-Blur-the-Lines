@@ -47,7 +47,7 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 # ---------------------------------------------------------------------------
 # Simulation parameters
 # ---------------------------------------------------------------------------
-LOSS_MODELS = ["FOBA", "Friis", "TwoRayGroundPropagationLossModel", "ItuR1411LosPropagationLossModel"]
+LOSS_MODELS = ["Friis", "TwoRayGroundPropagationLossModel", "ItuR1411LosPropagationLossModel", "FOBA"]
 ALGORITHMS  = ["aodv", "olsr", "dsdv"]
 
 # Discover epoch folders
@@ -98,13 +98,18 @@ SIGNAL_METRICS = {
     "dropPpduTooLate",
 }
 
-# Everything else falls into OTHER (macTxDrop, macRxDrop, dropFiltered, dropUnknown, …)
+# Everything else falls into OTHER (dropFiltered, dropUnknown, …)
+# macTxDrop / macRxDrop are aggregate counters (macRxDrop == sum of all specific
+# PhyRxDrop reasons), so they must be EXCLUDED to avoid double-counting.
+AGGREGATE_COUNTERS = {"macTxDrop", "macRxDrop"}
 
 GROUP_NAMES  = ["Congestion / Channel Busy", "Signal / Propagation", "Other / MAC"]
 GROUP_COLORS = ["#d62728", "#1f77b4", "#9467bd"]
 
 
 def classify_row(metric_name: str) -> str:
+    if metric_name in AGGREGATE_COUNTERS:
+        return "skip"
     if metric_name in CONGESTION_METRICS:
         return "congestion"
     if metric_name in SIGNAL_METRICS:
@@ -139,13 +144,36 @@ def sum_groups(drop_dict: dict[str, float]) -> tuple[float, float, float]:
     cong = sig = other = 0.0
     for k, v in drop_dict.items():
         grp = classify_row(k)
-        if grp == "congestion":
+        if grp == "skip":
+            continue  # aggregate counter — don't count
+        elif grp == "congestion":
             cong += v
         elif grp == "signal":
             sig += v
         else:
             other += v
     return cong, sig, other
+
+
+def read_node_traffic_drops(csv_path: str) -> tuple[float, float]:
+    """Return (total_PacketsDroppedNoRoute, total_PacketsDroppedRerr) summed over all nodes."""
+    no_route = 0.0
+    rerr = 0.0
+    try:
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            # Header has spaces after commas — strip them
+            if reader.fieldnames:
+                reader.fieldnames = [h.strip() for h in reader.fieldnames]
+            for row in reader:
+                try:
+                    no_route += float((row.get("PacketsDroppedNoRoute") or "0").strip())
+                    rerr     += float((row.get("PacketsDroppedRerr")     or "0").strip())
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        print(f"  [WARN] Could not read {csv_path}: {e}")
+    return no_route, rerr
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +218,7 @@ for epoch in BASE_DIRS:
 # ---------------------------------------------------------------------------
 avg_groups: dict = {lm: {algo: [] for algo in ALGORITHMS} for lm in LOSS_MODELS}
 ci95_cong:  dict = {lm: {algo: [] for algo in ALGORITHMS} for lm in LOSS_MODELS}
+ci95_sig:   dict = {lm: {algo: [] for algo in ALGORITHMS} for lm in LOSS_MODELS}
 
 for lm in LOSS_MODELS:
     for algo in ALGORITHMS:
@@ -208,9 +237,63 @@ for lm in LOSS_MODELS:
                     np.mean(other_vals),
                 ))
                 ci95_cong[lm][algo].append(ci95_halfwidth(cong_vals))
+                ci95_sig[lm][algo].append(ci95_halfwidth(sig_vals))
             else:
                 avg_groups[lm][algo].append((np.nan, np.nan, np.nan))
                 ci95_cong[lm][algo].append(np.nan)
+                ci95_sig[lm][algo].append(np.nan)
+
+# ---------------------------------------------------------------------------
+# Upstream / layer-bottleneck data
+# raw_upstream[epoch][lm][algo][node_idx] = (macTxDrop, PacketsDroppedNoRoute, PacketsDroppedRerr)
+# ---------------------------------------------------------------------------
+print("Collecting upstream drop data (macTxDrop, IP No-Route, IP Route-Error) …")
+raw_upstream: dict = {}
+for epoch in BASE_DIRS:
+    raw_upstream[epoch] = {}
+    for lm in LOSS_MODELS:
+        raw_upstream[epoch][lm] = {}
+        for algo in ALGORITHMS:
+            raw_upstream[epoch][lm][algo] = []
+            for nodes in NUM_NODES:
+                folder    = os.path.join(SOURCE, epoch, lm, algo, "numNodes", str(nodes))
+                drop_csv  = os.path.join(folder, "dropData.csv")
+                nt_csv    = os.path.join(folder, "node_traffic_mapping.csv")
+                mac_tx    = 0.0
+                if os.path.isfile(drop_csv):
+                    d      = read_drop_data(drop_csv)
+                    mac_tx = d.get("macTxDrop", 0.0)
+                no_route, rerr = (np.nan, np.nan)
+                if os.path.isfile(nt_csv):
+                    no_route, rerr = read_node_traffic_drops(nt_csv)
+                raw_upstream[epoch][lm][algo].append((mac_tx, no_route, rerr))
+
+# Average upstream metrics across epochs
+avg_upstream: dict = {lm: {algo: [] for algo in ALGORITHMS} for lm in LOSS_MODELS}
+ci95_up: dict = {
+    lm: {algo: {"macTxDrop": [], "noRoute": [], "rerr": []} for algo in ALGORITHMS}
+    for lm in LOSS_MODELS
+}
+
+for lm in LOSS_MODELS:
+    for algo in ALGORITHMS:
+        for i in range(len(NUM_NODES)):
+            mt_vals, nr_vals, re_vals = [], [], []
+            for epoch in BASE_DIRS:
+                mt, nr, re = raw_upstream[epoch][lm][algo][i]
+                mt_vals.append(mt)
+                if not np.isnan(nr):
+                    nr_vals.append(nr)
+                if not np.isnan(re):
+                    re_vals.append(re)
+            avg_upstream[lm][algo].append((
+                np.nanmean(mt_vals) if mt_vals else np.nan,
+                np.mean(nr_vals)    if nr_vals else np.nan,
+                np.mean(re_vals)    if re_vals else np.nan,
+            ))
+            ci95_up[lm][algo]["macTxDrop"].append(ci95_halfwidth(mt_vals))
+            ci95_up[lm][algo]["noRoute"].append(ci95_halfwidth(nr_vals) if nr_vals else np.nan)
+            ci95_up[lm][algo]["rerr"].append(ci95_halfwidth(re_vals) if re_vals else np.nan)
 
 # ---------------------------------------------------------------------------
 # Per-epoch proportion statistics for stacked bar Q25/Q75 whiskers
@@ -388,6 +471,113 @@ for algo in ALGORITHMS:
     ax.grid(False)
     plt.tight_layout()
     out = os.path.join(PLOTS_DIR, f"congestion_share_pct_{algo}.png")
+    plt.savefig(out, dpi=150)
+    plt.close()
+    print(f"  Saved {out}")
+
+# ---------------------------------------------------------------------------
+# Plot 4 — Full drop-bottleneck picture per algorithm
+# One figure per algorithm, 2×2 subplots (one per loss model).
+# Shows all five drop categories so AODV/DSDV PHY plateau can be understood:
+# as density rises, MAC TX queue and IP routing-layer absorb traffic upstream.
+# Y axis is shared across ALL algorithms so figures are directly comparable.
+# ---------------------------------------------------------------------------
+print("Generating full bottleneck drop plots …")
+
+# Pre-compute global Y bounds across every algo × lm × series so all figures
+# share the same log-scale axis range.
+_all_pos_vals: list[float] = []
+for _algo in ALGORITHMS:
+    for _lm in LOSS_MODELS:
+        for _i in range(len(NUM_NODES)):
+            for _v in [
+                avg_groups[_lm][_algo][_i][0],   # cong
+                avg_groups[_lm][_algo][_i][1],   # sig
+                avg_upstream[_lm][_algo][_i][0], # macTxDrop
+                avg_upstream[_lm][_algo][_i][1], # no_route
+                avg_upstream[_lm][_algo][_i][2], # rerr
+            ]:
+                if not (np.isnan(_v) or _v <= 0):
+                    _all_pos_vals.append(_v)
+
+if _all_pos_vals:
+    _global_ymin = 10 ** (np.floor(np.log10(min(_all_pos_vals))) - 0.1)
+    _global_ymax = 10 ** (np.ceil(np.log10(max(_all_pos_vals)))  + 0.1)
+else:
+    _global_ymin, _global_ymax = 1, 1e7
+
+# (label, color, marker, linestyle)
+BOTTLENECK_SERIES = [
+    ("PHY Congestion",  "#d62728", "o",  "-"),
+    ("PHY Signal",      "#1f77b4", "s",  "-"),
+    ("MAC TX Drop",     "#ff7f0e", "^",  "--"),
+    ("IP No-Route",     "#2ca02c", "D",  "-."),
+    ("IP Route Error",  "#9467bd", "v",  ":"),
+]
+
+for algo in ALGORITHMS:
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10), sharey=False)
+    axes = axes.flatten()
+
+    for lm_idx, lm in enumerate(LOSS_MODELS):
+        ax = axes[lm_idx]
+        x_nodes = np.array(NUM_NODES)
+
+        y_cong = np.array([avg_groups[lm][algo][i][0]    for i in range(len(NUM_NODES))], dtype=np.float64)
+        y_sig  = np.array([avg_groups[lm][algo][i][1]    for i in range(len(NUM_NODES))], dtype=np.float64)
+        y_mact = np.array([avg_upstream[lm][algo][i][0]  for i in range(len(NUM_NODES))], dtype=np.float64)
+        y_nr   = np.array([avg_upstream[lm][algo][i][1]  for i in range(len(NUM_NODES))], dtype=np.float64)
+        y_re   = np.array([avg_upstream[lm][algo][i][2]  for i in range(len(NUM_NODES))], dtype=np.float64)
+        e_cong = np.array(ci95_cong[lm][algo],              dtype=np.float64)
+        e_sig  = np.array(ci95_sig[lm][algo],               dtype=np.float64)
+        e_mact = np.array(ci95_up[lm][algo]["macTxDrop"],   dtype=np.float64)
+        e_nr   = np.array(ci95_up[lm][algo]["noRoute"],     dtype=np.float64)
+        e_re   = np.array(ci95_up[lm][algo]["rerr"],        dtype=np.float64)
+
+        datasets = [
+            (y_cong, e_cong, "PHY Congestion",  "#d62728", "o",  "-"),
+            (y_sig,  e_sig,  "PHY Signal",      "#1f77b4", "s",  "-"),
+            (y_mact, e_mact, "MAC TX Drop",     "#ff7f0e", "^",  "--"),
+            (y_nr,   e_nr,   "IP No-Route",     "#2ca02c", "D",  "-."),
+            (y_re,   e_re,   "IP Route Error",  "#9467bd", "v",  ":"),
+        ]
+
+        for y, yerr, label, color, marker, ls in datasets:
+            # Mask NaN and true zeros (zeros are undefined on log scale)
+            mask = ~np.isnan(y) & (y > 0)
+            if not mask.any():
+                continue
+            line, = ax.plot(
+                x_nodes[mask], y[mask],
+                marker=marker, markersize=5, linestyle=ls, color=color, label=label,
+            )
+            # Use asymmetric error bars clipped to stay positive (required for log scale)
+            valid_err = np.where(np.isnan(yerr), 0.0, yerr)[mask]
+            if np.any(valid_err > 0):
+                lo = np.minimum(valid_err, y[mask] * 0.99)  # never go below 1% of value
+                ax.errorbar(
+                    x_nodes[mask], y[mask],
+                    yerr=[lo, valid_err],
+                    fmt="none", color=color, alpha=0.5, capsize=2,
+                    linewidth=0.8, capthick=0.8,
+                )
+
+        ax.set_yscale("log")
+        ax.set_ylim(_global_ymin, _global_ymax)
+        ax.set_title(lm, fontsize=9)
+        ax.set_xlabel("Number of Nodes", fontsize=8)
+        ax.set_ylabel("Dropped Packets — log scale (mean ± 95 % CI)", fontsize=8)
+        ax.legend(fontsize=7, loc="upper left")
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    fig.suptitle(
+        f"Full Drop-Bottleneck Picture — {algo.upper()}\n"
+        f"PHY Congestion plateau = channel saturated upstream by MAC TX queue (orange) "
+        f"or IP routing layer (green/purple)",
+        fontsize=11,
+    )
+    plt.tight_layout()
+    out = os.path.join(PLOTS_DIR, f"full_bottleneck_{algo}.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"  Saved {out}")

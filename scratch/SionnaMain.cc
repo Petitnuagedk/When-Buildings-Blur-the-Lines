@@ -31,6 +31,7 @@ int main() {
                                                                             + " --routing=" + RA 
                                                                             + " --resultPath=" + dirPath.string()
                                                                             + " --numSource=" + numSrc
+                                                                            + " --layoutFile=scratch/node2.csv"
                                                                             + " --seed=" + std::to_string(epoch);
                         std::cout << runCmd << std::endl;
 
