@@ -1,0 +1,18 @@
+# Build artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated outputs
+plots/**/*.png
+graph-metric-tools/*.png
+*.gif
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store

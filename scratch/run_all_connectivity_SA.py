@@ -76,7 +76,7 @@ def main():
         sys.exit(1)
 
     if args.build_first:
-        run([str(ns3_runner), "build", "scratch/UrbanCompConnectivity.cc"])
+        run([str(ns3_runner), "build", "scratch/UrbanCompConnectivity-SA.cc"])
 
     total = len(args.loss_models) * len(args.nodes)
     done = 0
@@ -87,7 +87,7 @@ def main():
             cmd = [
                 str(ns3_runner),
                 "run",
-                "scratch/UrbanCompConnectivity.cc",
+                "scratch/UrbanCompConnectivity-SA.cc",
                 "--",
                 f"--numNodes={n}",
                 f"--lossModel={lm}",
