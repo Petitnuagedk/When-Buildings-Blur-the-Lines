@@ -37,13 +37,13 @@ def compute_95ci_halfwidth(values):
     return tval * s / np.sqrt(n)
 
 # === Config ===
-# Location where the simulation output is stored (as produced by UrbanCompMain-v2.cc)
+# Location where the simulation output is stored for Sionna RT results.
 # This script is in plot_scripts/, so we resolve the data directory relative to it.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SA-sionna"))
+source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "sionna-data", "UrbanRaCompDir-sionna"))
 
 # --- CLI ---
-parser = argparse.ArgumentParser(description="Plot urban comp metrics across epochs")
+parser = argparse.ArgumentParser(description="Plot Sionna UrbanRaCompDir-sionna metrics across epochs")
 parser.add_argument(
     "--epochs",
     "-e",
@@ -104,6 +104,9 @@ routing_overhead_across_epochs = {
     epoch: {algo: [] for algo in algorithms}
     for epoch in BASE_DIRS
 }
+
+success_counts = {algo: {nodes: 0 for nodes in num_nodes_list} for algo in algorithms}
+failure_counts = {algo: {nodes: 0 for nodes in num_nodes_list} for algo in algorithms}
 
 # === Extractors ===
 def extract_pdr_from_csv(csv_path):
@@ -210,16 +213,19 @@ for BASE_DIR in BASE_DIRS:
     for algo in algorithms:
         for nodes in num_nodes_list:
             folder = os.path.join(source, BASE_DIR, algo, "numNodes", str(nodes))
+            success = False
 
             if not os.path.isdir(folder):
-                print(f"MISSING FOLDER: {BASE_DIR}/{algo}/numNodes/{nodes} (skipping point)")
+                print(f"MISSING FOLDER: {BASE_DIR}/{algo}/numNodes/{nodes} (counting as failure)")
                 pdr_vs_nodes[algo].append(np.nan)
                 eed_vs_nodes[algo].append(np.nan)
                 goodput_vs_nodes[algo].append(np.nan)
+                failure_counts[algo][nodes] += 1
                 continue
 
             flow_csv = os.path.join(folder, "flow_information.csv")
             if os.path.isfile(flow_csv):
+                success = True
                 pdr = extract_pdr_from_csv(flow_csv)
                 eed = extract_eed_from_csv(flow_csv)
                 goodput = extract_goodput_from_csv(flow_csv)
@@ -250,6 +256,11 @@ for BASE_DIR in BASE_DIRS:
                     routing_overhead_across_epochs[BASE_DIR][algo].append(np.nan)  # keep index aligned
             else:
                 routing_overhead_across_epochs[BASE_DIR][algo].append(np.nan)
+
+            if success and os.path.isfile(flow_csv):
+                success_counts[algo][nodes] += 1
+            elif not success:
+                failure_counts[algo][nodes] += 1
 
     epochs[BASE_DIR]["pdr_vs_nodes"].append(pdr_vs_nodes)
     epochs[BASE_DIR]["eed_vs_nodes"].append(eed_vs_nodes)
@@ -410,6 +421,29 @@ def plot_routing_overhead_min_max(x_vals, avg_data, min_data, max_data, ylabel, 
     plt.savefig(os.path.join(PLOTS_DIR, f"{filename}.png"))
     plt.close()
 
+
+def plot_success_rate(x_vals, success_rate_data, ylabel, title, xlabel, filename, ylim=(0.0, 1.0)):
+    plt.figure(figsize=(10, 6))
+    for algo in algorithms:
+        y_vals = np.array(success_rate_data[algo], dtype=np.float64)
+        mask = ~np.isnan(y_vals)
+        plt.plot(
+            np.array(x_vals)[mask],
+            y_vals[mask],
+            label=algo.upper(),
+            marker='o',
+            linestyle='-'
+        )
+    plt.ylim(ylim)
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.legend()
+    plt.grid(False)
+    plt.tight_layout()
+    plt.savefig(os.path.join(PLOTS_DIR, f"{filename}.png"))
+    plt.close()
+
 # === Diagnostic: Print averaged values to detect flat-line cause ===
 print(f"\nDiscovered num_nodes_list: {num_nodes_list}")
 print(f"Epochs used: {BASE_DIRS}")
@@ -418,11 +452,14 @@ for algo in algorithms:
     eed_vals = average_metrics_across_epochs["eed_vs_nodes"][algo]
     gp_vals  = average_metrics_across_epochs["goodput_vs_nodes"][algo]
     ro_vals  = average_routing_overhead[algo]
+    success_rate = [success_counts[algo][n] / len(BASE_DIRS) for n in num_nodes_list]
     print(f"\n[{algo.upper()}]")
     print(f"  PDR     : {pdr_vals}")
     print(f"  EED     : {eed_vals}")
     print(f"  Goodput : {gp_vals}")
     print(f"  Rout.OH : {ro_vals}")
+    print(f"  Success : {[success_counts[algo][n] for n in num_nodes_list]}/{len(BASE_DIRS)}")
+    print(f"  Failure : {[failure_counts[algo][n] for n in num_nodes_list]}/{len(BASE_DIRS)}")
 
 # === Final Plot Calls ===
 pdr_ylim = (0.0, 1.0)
@@ -433,4 +470,5 @@ routing_overhead_ylim = (0.0, 2.0)
 plot_metric_by_algorithm(num_nodes_list, average_metrics_across_epochs["pdr_vs_nodes"], "Packet Delivery Ratio", "PDR vs. Number of Nodes (Sionna RT)", "Number of Nodes", "pdr_vs_nodes", yerr_data=average_metrics_ci95_across_epochs["pdr_vs_nodes"], ylim=pdr_ylim)
 plot_metric_by_algorithm(num_nodes_list, average_metrics_across_epochs["eed_vs_nodes"], "End-to-End Delay (s)", "EED vs. Number of Nodes (Sionna RT)", "Number of Nodes", "eed_vs_nodes", yerr_data=average_metrics_ci95_across_epochs["eed_vs_nodes"], ylim=eed_ylim)
 plot_metric_by_algorithm(num_nodes_list, average_metrics_across_epochs["goodput_vs_nodes"], "Goodput (kb/s)", "Goodput vs. Number of Nodes (Sionna RT)", "Number of Nodes", "goodput_vs_nodes", yerr_data=average_metrics_ci95_across_epochs["goodput_vs_nodes"], ylim=goodput_ylim)
+plot_success_rate(num_nodes_list, {algo: [success_counts[algo][n] / len(BASE_DIRS) for n in num_nodes_list] for algo in algorithms}, "Success Rate", "Simulation Success Rate vs. Number of Nodes (Sionna RT)", "Number of Nodes", "success_rate", ylim=(0.0,1.0))
 plot_routing_overhead_min_max(num_nodes_list, average_routing_overhead, min_routing_overhead, max_routing_overhead, "Routing Overhead", "Routing Overhead vs. Number of Nodes (Sionna RT)", "Number of Nodes", "routing_overhead", ylim=routing_overhead_ylim)

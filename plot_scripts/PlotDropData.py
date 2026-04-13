@@ -40,7 +40,7 @@ args = parser.parse_args()
 # Paths — mirror PlotUrbanComp-v2.py convention
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SOURCE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-v2"))
+SOURCE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SB"))
 PLOTS_DIR = os.path.join(SCRIPT_DIR, "..", "plots-drops")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
@@ -388,7 +388,6 @@ for algo in ALGORITHMS:
     legend_elements = [
         Patch(facecolor=GROUP_COLORS[0], label="Congestion / Channel Busy"),
         Patch(facecolor=GROUP_COLORS[1], label="Signal / Propagation"),
-        Patch(facecolor=GROUP_COLORS[2], label="Other / MAC"),
         Line2D([0], [0], color='black', linewidth=0.8, marker='_', markersize=6,
                label="Q25 / Q75 (segment boundary, across epochs)"),
     ]
