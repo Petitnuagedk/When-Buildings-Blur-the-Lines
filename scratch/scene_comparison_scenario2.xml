@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Mitsuba 3 scene for FOBA-vs-Sionna comparison scenario 2
+    TX: (50, 40, 2)
+    RX trajectory: (-50, -40, 2) -> (150, -40, 2)
+    Building A: center (50, 0), square side 10 m
+    Building B: center (0, 0), square side 10 m
+    Building C: center (100, 0), square side 10 m
+-->
+<scene version="3.0.0">
+
+    <bsdf type="itu-radio-material" id="mat-concrete">
+        <string name="type" value="concrete"/>
+    </bsdf>
+
+    <bsdf type="itu-radio-material" id="mat-ground">
+        <string name="type" value="concrete"/>
+    </bsdf>
+
+    <shape type="rectangle" id="ground_plane">
+        <ref id="mat-ground"/>
+        <transform name="to_world">
+            <scale x="200.0" y="120.0" z="1.0"/>
+            <translate x="50.0" y="0.0" z="0.0"/>
+        </transform>
+    </shape>
+
+    <shape type="cube" id="building_a">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="5.0" y="5.0" z="7.5"/>
+            <translate x="50.0" y="0.0" z="7.5"/>
+        </transform>
+    </shape>
+
+    <shape type="cube" id="building_b">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="5.0" y="5.0" z="7.5"/>
+            <translate x="0.0" y="0.0" z="7.5"/>
+        </transform>
+    </shape>
+
+    <shape type="cube" id="building_c">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="5.0" y="5.0" z="7.5"/>
+            <translate x="100.0" y="0.0" z="7.5"/>
+        </transform>
+    </shape>
+
+</scene>

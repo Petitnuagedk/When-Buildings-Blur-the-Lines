@@ -34,14 +34,16 @@ except ImportError:
 parser = argparse.ArgumentParser(description="Plot drop-reason evolution vs node count")
 parser.add_argument("--epochs", "-e", type=int, default=None,
                     help="Number of epochs to use (first N sorted). Default: all detected.")
+parser.add_argument("--output", default=None,
+                    help="Output directory for plots (default: plots-drops/ next to repo root).")
 args = parser.parse_args()
 
 # ---------------------------------------------------------------------------
 # Paths — mirror PlotUrbanComp-v2.py convention
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SOURCE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SB"))
-PLOTS_DIR = os.path.join(SCRIPT_DIR, "..", "plots-drops")
+SOURCE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SB-alt"))
+PLOTS_DIR = args.output if args.output else os.path.join(SCRIPT_DIR, "..", "plots-drops")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -244,6 +246,29 @@ for lm in LOSS_MODELS:
                 ci95_sig[lm][algo].append(np.nan)
 
 # ---------------------------------------------------------------------------
+# Total dropped packets across all PHY drop groups
+# avg_total[lm][algo][node_idx] = mean(cong + sig + other)
+# ci95_total[lm][algo][node_idx] = ci95 half-width for total drops
+# ---------------------------------------------------------------------------
+avg_total: dict = {lm: {algo: [] for algo in ALGORITHMS} for lm in LOSS_MODELS}
+ci95_total: dict = {lm: {algo: [] for algo in ALGORITHMS} for lm in LOSS_MODELS}
+
+for lm in LOSS_MODELS:
+    for algo in ALGORITHMS:
+        for i in range(len(NUM_NODES)):
+            total_vals = []
+            for epoch in BASE_DIRS:
+                c, s, o = raw[epoch][lm][algo][i]
+                if not np.isnan(c):
+                    total_vals.append(c + s + o)
+            if total_vals:
+                avg_total[lm][algo].append(np.mean(total_vals))
+                ci95_total[lm][algo].append(ci95_halfwidth(total_vals))
+            else:
+                avg_total[lm][algo].append(np.nan)
+                ci95_total[lm][algo].append(np.nan)
+
+# ---------------------------------------------------------------------------
 # Upstream / layer-bottleneck data
 # raw_upstream[epoch][lm][algo][node_idx] = (macTxDrop, PacketsDroppedNoRoute, PacketsDroppedRerr)
 # ---------------------------------------------------------------------------
@@ -391,14 +416,16 @@ for algo in ALGORITHMS:
         Line2D([0], [0], color='black', linewidth=0.8, marker='_', markersize=6,
                label="Q25 / Q75 (segment boundary, across epochs)"),
     ]
-    ax.legend(handles=legend_elements, loc="upper left")
+    ax.legend(handles=legend_elements, loc="upper left", fontsize=10, title_fontsize=10)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(NUM_NODES)
-    ax.set_xlabel("Number of Nodes")
-    ax.set_ylabel("Share of Total Drops")
+    ax.set_xticklabels(NUM_NODES, fontsize=12)
+    ax.set_xlabel("Number of Nodes", fontsize=16, fontweight="bold")
+    ax.set_ylabel("Share of Total Drops", fontsize=16, fontweight="bold")
     ax.set_title(f"Drop-Reason Composition vs. Node Density — {algo.upper()}\n"
-                 f"(stacked = normalised; congestion share grows with density)")
+                 f"(stacked = normalised; congestion share grows with density)",
+                 fontsize=17, fontweight="bold")
+    ax.tick_params(axis='y', labelsize=12)
     ax.set_ylim(0, 1)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
     ax.grid(axis="y", linestyle="--", alpha=0.4)
@@ -430,12 +457,33 @@ for algo in ALGORITHMS:
                 y[mask] + np.nan_to_num(valid_err),
                 color=line.get_color(), alpha=0.2,
             )
-    ax.set_xlabel("Number of Nodes")
-    ax.set_ylabel("Dropped Packets (Congestion Group)")
+
+        # Total dropped packets across all PHY drop groups
+        y_total = np.array([avg_total[lm][algo][i] for i in range(len(NUM_NODES))], dtype=np.float64)
+        yerr_total = np.array(ci95_total[lm][algo], dtype=np.float64)
+        total_mask = ~np.isnan(y_total)
+        ax.plot(
+            np.array(NUM_NODES)[total_mask],
+            y_total[total_mask],
+            marker="x", markersize=6, linestyle="--", color=line.get_color(),
+            alpha=0.75, label=f"{lm} total",
+        )
+        valid_total_err = yerr_total[total_mask]
+        if not np.all(np.isnan(valid_total_err)):
+            ax.fill_between(
+                np.array(NUM_NODES)[total_mask],
+                y_total[total_mask] - np.nan_to_num(valid_total_err),
+                y_total[total_mask] + np.nan_to_num(valid_total_err),
+                color=line.get_color(), alpha=0.12,
+            )
+    ax.set_xlabel("Number of Nodes", fontsize=13, fontweight="bold")
+    ax.set_ylabel("Dropped Packets (Congestion Group)", fontsize=13, fontweight="bold")
     ax.set_title(f"Congestion-Related Drops vs. Node Density — {algo.upper()}\n"
                  f"(mean ± 95 % CI across epochs; includes: dropRxing, dropTxing,\n"
-                 f" dropBusyDecodingPreamble, dropPreambleDetectionPacketSwitch)")
-    ax.legend()
+                 f" dropBusyDecodingPreamble, dropPreambleDetectionPacketSwitch)",
+                 fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10)
+    ax.tick_params(labelsize=9)
     ax.grid(False)
     plt.tight_layout()
     out = os.path.join(PLOTS_DIR, f"congestion_drops_abs_{algo}.png")
@@ -461,12 +509,14 @@ for algo in ALGORITHMS:
         mask = ~np.isnan(y)
         ax.plot(np.array(NUM_NODES)[mask], y[mask] * 100,
                 marker="o", markersize=6, label=lm)
-    ax.set_xlabel("Number of Nodes")
-    ax.set_ylabel("Congestion Drops (% of total drops)")
+    ax.set_xlabel("Number of Nodes", fontsize=13, fontweight="bold")
+    ax.set_ylabel("Congestion Drops (% of total drops)", fontsize=13, fontweight="bold")
     ax.set_title(f"Congestion Share of All Drops vs. Node Density — {algo.upper()}\n"
-                 f"(rising share = emerging channel saturation)")
+                 f"(rising share = emerging channel saturation)",
+                 fontsize=13, fontweight="bold")
     ax.set_ylim(0, 100)
-    ax.legend()
+    ax.legend(fontsize=10)
+    ax.tick_params(labelsize=9)
     ax.grid(False)
     plt.tight_layout()
     out = os.path.join(PLOTS_DIR, f"congestion_share_pct_{algo}.png")
@@ -492,6 +542,7 @@ for _algo in ALGORITHMS:
             for _v in [
                 avg_groups[_lm][_algo][_i][0],   # cong
                 avg_groups[_lm][_algo][_i][1],   # sig
+                avg_total[_lm][_algo][_i],       # total drops
                 avg_upstream[_lm][_algo][_i][0], # macTxDrop
                 avg_upstream[_lm][_algo][_i][1], # no_route
                 avg_upstream[_lm][_algo][_i][2], # rerr
@@ -561,19 +612,40 @@ for algo in ALGORITHMS:
                     linewidth=0.8, capthick=0.8,
                 )
 
+        y_tot = np.array([avg_total[lm][algo][i] for i in range(len(NUM_NODES))], dtype=np.float64)
+        e_tot = np.array(ci95_total[lm][algo], dtype=np.float64)
+        tot_mask = ~np.isnan(y_tot) & (y_tot > 0)
+        if tot_mask.any():
+            ax.plot(
+                x_nodes[tot_mask], y_tot[tot_mask],
+                marker="x", linestyle=":", color="black", markersize=6,
+                linewidth=1.5, label="Total drops",
+            )
+            valid_tot_err = np.where(np.isnan(e_tot), 0.0, e_tot)[tot_mask]
+            if np.any(valid_tot_err > 0):
+                lo_tot = np.minimum(valid_tot_err, y_tot[tot_mask] * 0.99)
+                ax.errorbar(
+                    x_nodes[tot_mask], y_tot[tot_mask],
+                    yerr=[lo_tot, valid_tot_err],
+                    fmt="none", color="black", alpha=0.35, capsize=2,
+                    linewidth=0.8, capthick=0.8,
+                )
+
         ax.set_yscale("log")
         ax.set_ylim(_global_ymin, _global_ymax)
-        ax.set_title(lm, fontsize=9)
-        ax.set_xlabel("Number of Nodes", fontsize=8)
-        ax.set_ylabel("Dropped Packets — log scale (mean ± 95 % CI)", fontsize=8)
-        ax.legend(fontsize=7, loc="upper left")
+        ax.set_title(lm, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Number of Nodes", fontsize=13, fontweight="bold")
+        if lm_idx % 2 == 0:
+            ax.set_ylabel("Dropped Packets\n(log scale, mean ± 95 % CI)", fontsize=13, fontweight="bold")
+        ax.legend(fontsize=11, loc="upper left")
+        ax.tick_params(labelsize=11)
         ax.grid(axis="y", linestyle="--", alpha=0.3)
 
     fig.suptitle(
         f"Full Drop-Bottleneck Picture — {algo.upper()}\n"
         f"PHY Congestion plateau = channel saturated upstream by MAC TX queue (orange) "
         f"or IP routing layer (green/purple)",
-        fontsize=11,
+        fontsize=14, fontweight="bold",
     )
     plt.tight_layout()
     out = os.path.join(PLOTS_DIR, f"full_bottleneck_{algo}.png")

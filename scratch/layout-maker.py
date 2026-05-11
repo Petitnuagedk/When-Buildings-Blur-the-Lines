@@ -228,7 +228,15 @@ def write_csv(buildings: list[dict], path: str):
     print(f"Written {len(buildings)} buildings to {path}")
 
 
-def plot_layout(buildings: list[dict], area_size: int, profile_name: str, positions: list[tuple[float,float]] | None = None):
+def plot_layout(
+    buildings: list[dict],
+    area_size: int,
+    profile_name: str,
+    positions: list[tuple[float, float]] | None = None,
+    ax=None,
+    fontsize: int = 14,
+    title: str | None = None,
+):
     try:
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
@@ -237,17 +245,24 @@ def plot_layout(buildings: list[dict], area_size: int, profile_name: str, positi
         return
 
     half = area_size / 2
-    fig, ax = plt.subplots(figsize=(7, 7))
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(7, 7))
+
     ax.set_xlim(-half, half)
     ax.set_ylim(-half, half)
     ax.set_aspect("equal")
     ax.set_facecolor("#f5f5f0")
-    ax.set_title(f"Building layout — profile: {profile_name} "
-                 f"({len(buildings)} buildings)", fontsize=11)
-    ax.set_xlabel("x (m)")
-    ax.set_ylabel("y (m)")
+    ax.set_title(
+        title if title is not None
+        else f"Building layout — profile: {profile_name} ({len(buildings)} buildings)",
+        fontsize=fontsize + 1,
+    )
+    ax.set_xlabel("x (m)", fontsize=fontsize)
+    ax.set_ylabel("y (m)", fontsize=fontsize)
+    ax.tick_params(axis="both", labelsize=fontsize - 1)
     # draw grid and central axes for orientation
-    ax.grid(True, linestyle='--', linewidth=0.5, color="#cccccc")
+    ax.grid(True, linestyle="--", linewidth=0.5, color="#cccccc")
     ax.axhline(0, color="#444444", linewidth=1)
     ax.axvline(0, color="#444444", linewidth=1)
 
@@ -257,31 +272,76 @@ def plot_layout(buildings: list[dict], area_size: int, profile_name: str, positi
         rect = patches.Rectangle(
             (b["xmin"], b["ymin"]), w, h,
             linewidth=0.5, edgecolor="#334466",
-            facecolor="#6688aa", alpha=0.75
+            facecolor="#6688aa", alpha=0.75,
         )
         ax.add_patch(rect)
 
     # draw node positions if provided
     if positions:
         xs, ys = zip(*positions)
-        ax.scatter(xs, ys, c="red", s=20, marker="o", label="nodes")
-        ax.legend(loc="upper right", fontsize=8)
+        ax.scatter(xs, ys, c="red", s=30, marker="o", label=f"nodes ({len(positions)})")
+        ax.legend(loc="upper right", fontsize=fontsize)
 
     # Coverage stats
-    cell_area     = (b["xmax"] - b["xmin"]) * (b["ymax"] - b["ymin"])
-    total_bld     = len(buildings) * cell_area
-    total_area    = area_size ** 2
-    coverage_pct  = 100 * total_bld / total_area
-    ax.text(0.02, 0.98,
-            f"Buildings: {len(buildings)}\n"
-            f"Coverage: {coverage_pct:.1f}%",
+    if buildings:
+        b0 = buildings[0]
+        cell_area    = (b0["xmax"] - b0["xmin"]) * (b0["ymax"] - b0["ymin"])
+        total_bld    = len(buildings) * cell_area
+        coverage_pct = 100 * total_bld / area_size ** 2
+        ax.text(
+            0.02, 0.98,
+            f"Buildings: {len(buildings)}\nCoverage: {coverage_pct:.1f}%",
             transform=ax.transAxes,
             verticalalignment="top",
-            fontsize=9,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8))
+            fontsize=fontsize,
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8),
+        )
 
-    plt.tight_layout()
-    plt.show()
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+
+
+def plot_three_examples(
+    area_size: int = 1500,
+    cell_size: int = 75,
+    building_size: int = 50,
+    building_height: float = 25.0,
+    profile_name: str = "core",
+    min_spacing: float = 10.0,
+    clearance: float = 3.0,
+    fontsize: int = 14,
+):
+    """Plot three example layouts with different node counts and seeds in separate windows."""
+    configs = [
+        {"nodes": 250, "seed": 41},
+        {"nodes":  50, "seed":  0},
+        {"nodes": 100, "seed":  1},
+    ]
+
+    for cfg in configs:
+        buildings = generate_layout(
+            area_size=area_size,
+            cell_size=cell_size,
+            building_size=building_size,
+            building_height=building_height,
+            profile_name=profile_name,
+            min_spacing=min_spacing,
+            seed=cfg["seed"],
+        )
+        positions = generate_positions(
+            count=cfg["nodes"],
+            area_size=area_size,
+            buildings=buildings,
+            clearance=clearance,
+            seed=cfg["seed"],
+        )
+        title = (
+            f"{cfg['nodes']} nodes  |  seed = {cfg['seed']}  |  "
+            f"{len(buildings)} buildings  |  profile: {profile_name}"
+        )
+        plot_layout(buildings, area_size, profile_name, positions,
+                    fontsize=fontsize, title=title)
 
 
 # ------------------------------------------------------------------
@@ -345,6 +405,8 @@ def main():
                         help="CSV path to write generated positions (x,y)")
     parser.add_argument("--plot",    action="store_true",
                         help="Visualise the layout with matplotlib (x-y axes display)")
+    parser.add_argument("--plot-examples", action="store_true",
+                        help="Plot three example layouts (250/seed=41, 50/seed=0, 100/seed=1)")
     parser.add_argument("--ns3",     action="store_true",
                         help="Print a ready-to-paste ns-3 C++ snippet")
     args = parser.parse_args()
@@ -387,7 +449,18 @@ def main():
 
     if args.plot:
         plot_layout(buildings, args.size, args.profile,
-                    positions = pts if args.nodes > 0 else None)
+                    positions=pts if args.nodes > 0 else None)
+
+    if args.plot_examples:
+        plot_three_examples(
+            area_size=args.size,
+            cell_size=args.cell,
+            building_size=args.bsize,
+            building_height=args.height,
+            profile_name=args.profile,
+            min_spacing=args.spacing,
+            clearance=args.clearance,
+        )
 
     if args.ns3:
         print_ns3_snippet(buildings)

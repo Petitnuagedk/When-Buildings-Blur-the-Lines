@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Mitsuba 3 scene for FOBA-vs-Sionna comparison scenario 3
+    TX: (0, 0, 2)
+    RX path: (0, 50) -> (75, 50) -> (75, -75) -> (-125, -75) -> (-125, -125)
+    Buildings: 20 m squares on a 50 m grid in [-100, 100] x [-100, 100],
+    excluding the origin.
+-->
+<scene version="3.0.0">
+
+    <bsdf type="itu-radio-material" id="mat-concrete">
+        <string name="type" value="concrete"/>
+    </bsdf>
+
+    <bsdf type="itu-radio-material" id="mat-ground">
+        <string name="type" value="concrete"/>
+    </bsdf>
+
+    <shape type="rectangle" id="ground_plane">
+        <ref id="mat-ground"/>
+        <transform name="to_world">
+            <scale x="220.0" y="220.0" z="1.0"/>
+            <translate x="0.0" y="0.0" z="0.0"/>
+        </transform>
+    </shape>
+
+    <shape type="cube" id="building_n100_n100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-100.0" y="-100.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n100_n50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-100.0" y="-50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n100_0">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-100.0" y="0.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n100_50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-100.0" y="50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n100_100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-100.0" y="100.0" z="7.5"/></transform>
+    </shape>
+
+    <shape type="cube" id="building_n50_n100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-50.0" y="-100.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n50_n50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-50.0" y="-50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n50_0">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-50.0" y="0.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n50_50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-50.0" y="50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_n50_100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="-50.0" y="100.0" z="7.5"/></transform>
+    </shape>
+
+    <shape type="cube" id="building_0_n100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="0.0" y="-100.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_0_n50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="0.0" y="-50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_0_50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="0.0" y="50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_0_100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="0.0" y="100.0" z="7.5"/></transform>
+    </shape>
+
+    <shape type="cube" id="building_50_n100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="50.0" y="-100.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_50_n50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="50.0" y="-50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_50_0">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="50.0" y="0.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_50_50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="50.0" y="50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_50_100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="50.0" y="100.0" z="7.5"/></transform>
+    </shape>
+
+    <shape type="cube" id="building_100_n100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="100.0" y="-100.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_100_n50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="100.0" y="-50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_100_0">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="100.0" y="0.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_100_50">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="100.0" y="50.0" z="7.5"/></transform>
+    </shape>
+    <shape type="cube" id="building_100_100">
+        <ref id="mat-concrete"/>
+        <transform name="to_world"><scale x="10.0" y="10.0" z="7.5"/><translate x="100.0" y="100.0" z="7.5"/></transform>
+    </shape>
+
+</scene>

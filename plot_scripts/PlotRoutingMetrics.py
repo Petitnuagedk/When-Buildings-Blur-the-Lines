@@ -36,10 +36,17 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR    = os.path.join(SCRIPT_DIR, "..", "plots-routing")
 
-SOURCE_SA = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SA"))
-SOURCE_SB = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SB"))
+# Allow output directory to be overridden from the command line so that a
+# master runner can collect all figures into a single tree.
+import argparse as _ap
+_ap_parser = _ap.ArgumentParser(add_help=False)
+_ap_parser.add_argument("--output", default=os.path.join(SCRIPT_DIR, "..", "plots-routing-alt"))
+_known, _unknown = _ap_parser.parse_known_args()
+OUT_DIR = _known.output
+
+SOURCE_SA = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SA-alt"))
+SOURCE_SB = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SB-alt"))
 
 MAX_GOODPUT_KBPS = 150.0
 
@@ -71,7 +78,7 @@ MODEL_MARKERS = {
     "ItuR1411LosPropagationLossModel":  "^",
 }
 
-ALGORITHMS = ["aodv", "olsr", "dsdv"]
+ALGORITHMS = ["aodv", "dsdv", "olsr"]
 
 # (key, short_label, y_label, aodv_only)
 METRICS = [
@@ -358,14 +365,17 @@ def _draw_panel(ax, x_arr, stats, metric_key, algo, log_scale=False):
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.tick_params(labelsize=7)
+    ax.tick_params(labelsize=9)
     return has_data
 
 
-def _format_xticks(ax, x_arr):
-    ax.set_xlabel("Num. nodes", fontsize=7)
+def _format_xticks(ax, x_arr, show_xlabel=False):
+    if show_xlabel:
+        ax.set_xlabel("Num. nodes", fontsize=10, fontweight="bold")
+    else:
+        ax.set_xlabel("")
     ax.set_xticks(x_arr)
-    ax.set_xticklabels([str(v) for v in x_arr], fontsize=6, rotation=45)
+    ax.set_xticklabels([str(v) for v in x_arr], fontsize=8, rotation=45)
 
 
 def _legend_handles():
@@ -458,13 +468,13 @@ def build_dashboard(stats, num_nodes_list, scenario_label, fig_num):
     fig = plt.figure(figsize=(5.5 * n_algos, 3.8 * n_metrics))
     fig.suptitle(
         f"Traffic Performance – {scenario_label}",
-        fontsize=15, fontweight="bold", y=0.995,
+        fontsize=17, fontweight="bold", y=0.995,
     )
 
     gs = gridspec.GridSpec(
         n_metrics, n_algos,
         figure=fig,
-        hspace=0.38, wspace=0.20,
+        hspace=0.18, wspace=0.20,
         top=0.93, bottom=0.07, left=0.08, right=0.98,
     )
 
@@ -473,26 +483,26 @@ def build_dashboard(stats, num_nodes_list, scenario_label, fig_num):
             ax = fig.add_subplot(gs[row, col])
 
             if row == 0:
-                ax.set_title(algo.upper(), fontsize=11, fontweight="bold", pad=6)
+                ax.set_title(algo.upper(), fontsize=13, fontweight="bold", pad=6)
 
             _draw_panel(ax, x_arr, stats, mk, algo)
             if col == 0:
-                ax.set_ylabel(y_label, fontsize=8)
+                ax.set_ylabel(y_label, fontsize=11, fontweight="bold")
             ylim = row_ylims.get(mk)
             if ylim is not None:
                 ax.set_ylim(ylim)
             if mk == "goodput":
                 ax.axhline(y=81.92, color="grey", linestyle=":",
                            linewidth=1.0, alpha=0.6)
-            _format_xticks(ax, x_arr)
+            _format_xticks(ax, x_arr, show_xlabel=(row == n_metrics - 1))
 
             # Embed legend in top-right panel
             if row == 0 and col == n_algos - 1:
                 ax.legend(
                     handles=_legend_handles(),
                     title="Prop. model",
-                    title_fontsize=8,
-                    fontsize=7,
+                    title_fontsize=10,
+                    fontsize=9,
                     loc="best",
                     frameon=True,
                     framealpha=0.85,
@@ -511,12 +521,12 @@ def build_dashboard(stats, num_nodes_list, scenario_label, fig_num):
 # ---------------------------------------------------------------------------
 def build_routing_overhead_fig(stats_sa, nodes_sa, stats_sb, nodes_sb):
     """
-    2 rows (SA, SB) × 3 cols (AODV, OLSR, DSDV).
+    2 rows (SA, SB) × 3 cols (AODV, DSDV, OLSR).
     All 6 panels share the same Y axis. Legend embedded in top-right panel.
     """
     scenario_rows = [
-        (stats_sa, nodes_sa, "Scenario A (v1)"),
-        (stats_sb, nodes_sb, "Scenario B (v2)"),
+        (stats_sa, nodes_sa, "Scenario A"),
+        (stats_sb, nodes_sb, "Scenario B"),
     ]
 
     # Single shared log-scale y-limit across SA + SB, all algorithms
@@ -525,13 +535,13 @@ def build_routing_overhead_fig(stats_sa, nodes_sa, stats_sb, nodes_sb):
     fig = plt.figure(figsize=(5.5 * len(ALGORITHMS), 3.8 * 2))
     fig.suptitle(
         "Routing Overhead – Scenario A vs Scenario B",
-        fontsize=15, fontweight="bold", y=0.995,
+        fontsize=17, fontweight="bold", y=0.995,
     )
 
     gs = gridspec.GridSpec(
         2, len(ALGORITHMS),
         figure=fig,
-        hspace=0.28, wspace=0.15,
+        hspace=0.15, wspace=0.15,
         top=0.90, bottom=0.09, left=0.08, right=0.98,
     )
 
@@ -541,11 +551,11 @@ def build_routing_overhead_fig(stats_sa, nodes_sa, stats_sb, nodes_sb):
 
             # Column header on first row only
             if row == 0:
-                ax.set_title(algo.upper(), fontsize=11, fontweight="bold", pad=6)
+                ax.set_title(algo.upper(), fontsize=13, fontweight="bold", pad=6)
 
             # Row label on leftmost column
             if col == 0:
-                ax.set_ylabel(f"{sc_label}\nRouting Overhead", fontsize=8)
+                ax.set_ylabel(f"{sc_label}\nRouting Overhead", fontsize=11, fontweight="bold")
 
             if stats is None or not nodes:
                 ax.text(0.5, 0.5, "No data",
@@ -559,15 +569,15 @@ def build_routing_overhead_fig(stats_sa, nodes_sa, stats_sb, nodes_sb):
                 ax.set_yscale("log")
                 if ylim is not None:
                     ax.set_ylim(ylim)
-                _format_xticks(ax, x_arr)
+                _format_xticks(ax, x_arr, show_xlabel=(row == 1))
 
             # Embed legend in top-right panel
             if row == 0 and col == len(ALGORITHMS) - 1:
                 ax.legend(
                     handles=_legend_handles(),
                     title="Prop. model",
-                    title_fontsize=8,
-                    fontsize=7,
+                    title_fontsize=10,
+                    fontsize=9,
                     loc="best",
                     frameon=True,
                     framealpha=0.85,
@@ -594,13 +604,13 @@ if __name__ == "__main__":
 
     if stats_sa and nodes_sa:
         print("Building Figure 1 – SA Traffic Dashboard (PDR / Goodput / EED) …")
-        build_dashboard(stats_sa, nodes_sa, "Scenario A (v1)", fig_num=1)
+        build_dashboard(stats_sa, nodes_sa, "Scenario A", fig_num=1)
     else:
         print("[skip] No SA data – Figure 1 skipped")
 
     if stats_sb and nodes_sb:
         print("Building Figure 2 – SB Traffic Dashboard (PDR / Goodput / EED) …")
-        build_dashboard(stats_sb, nodes_sb, "Scenario B (v2)", fig_num=2)
+        build_dashboard(stats_sb, nodes_sb, "Scenario B", fig_num=2)
     else:
         print("[skip] No SB data – Figure 2 skipped")
 

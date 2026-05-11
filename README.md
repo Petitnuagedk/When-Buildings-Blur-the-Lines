@@ -93,6 +93,18 @@ g++ -std=c++17 -pthread -o UrbanCompMain-v2 scratch/UrbanCompMain-v2.cc
 sbatch scratch/sbatch_sionna_array.sh
 ```
 
+### FOBA vs Sionna Direct Comparison
+
+A minimal 2-node scenario (1 static TX, 1 mobile RX walking behind a building)
+that logs received power from both FOBA and Sionna RT at each time step:
+
+```bash
+./ns3 run scratch/FobaSionnaComparison.cc
+
+# Plot results
+python plot_scripts/PlotFobaSionnaComparison.py
+```
+
 ### Connectivity Analysis
 
 ```bash
@@ -113,6 +125,7 @@ python plot_scripts/PlotDropData.py         # Packet drop analysis
 python plot_scripts/PlotRoutingMetrics.py   # SA vs SB routing comparison
 python plot_scripts/PlotSA_CompactDashboard.py  # SA connectivity dashboard
 python plot_scripts/PlotSB_CompactDashboard.py  # SB connectivity dashboard
+python plot_scripts/PlotFobaSionnaComparison.py # FOBA vs Sionna 2-node comparison
 ```
 
 ---
@@ -134,6 +147,8 @@ python plot_scripts/PlotSB_CompactDashboard.py  # SB connectivity dashboard
 │   ├── sionna-rt-custom-variant.cc     # Sionna with connectivity logging
 │   ├── sionna-rt-connectivity-v2.cpp   # Sionna connectivity tracker
 │   ├── ConnectivityBatchRunner.cc      # Sionna connectivity batch sweeper
+│   ├── FobaSionnaComparison.cc        # FOBA vs Sionna 2-node loss comparison
+│   ├── scene_comparison.xml           # Mitsuba 3 scene for comparison (1 building)
 │   ├── run_all_connectivity_SA.py      # Python batch: SA connectivity sweeps
 │   ├── run_all_connectivity-SB.py      # Python batch: SB connectivity sweeps
 │   ├── layout-maker.py                 # Generate building layouts (uniform/core/corridor)
@@ -168,7 +183,8 @@ python plot_scripts/PlotSB_CompactDashboard.py  # SB connectivity dashboard
 │   ├── PlotRtConnectivity.py          # Ray-tracing path-loss visualization
 │   ├── PlotUrbanCompConnectivity.py   # Static path-loss heatmap
 │   ├── PlotSA_CompactDashboard.py     # SA connectivity dashboard (7 metrics)
-│   └── PlotSB_CompactDashboard.py     # SB connectivity dashboard + radar
+│   ├── PlotSB_CompactDashboard.py     # SB connectivity dashboard + radar
+│   └── PlotFobaSionnaComparison.py   # FOBA vs Sionna comparison plots
 │
 ├── graph-metric-tools/                  # NetworkX graph analysis
 │   ├── graph-metric-exta.py            # Compute centrality, clustering, paths

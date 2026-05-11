@@ -7,8 +7,8 @@ import numpy as np
 # Location where the simulation output is stored.
 # This script is in plot_scripts/, so we resolve the data directory relative to it.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-source = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "SASB-data", "UrbanRaCompDir-SA"))
-BASE_DIRS = ["Epoch_1"] #, "Epoch_2", "Epoch_3", "Epoch_4", "Epoch_5", "Epoch_6", "Epoch_7"] # , "Epoch_8", "Epoch_9", "Epoch_10"]
+source = r"C:\Users\hugol\Documents\Firenze\B\j1\SASB-data\UrbanRaCompDir-SA-fus"
+BASE_DIRS = ["Epoch_1", "Epoch_2", "Epoch_3", "Epoch_4", "Epoch_5", "Epoch_6", "Epoch_7", "Epoch_8", "Epoch_9", "Epoch_10"]
 loss_models = ["FOBA", "Friis", "TwoRayGroundPropagationLossModel", "ItuR1411LosPropagationLossModel"] #,"Tuned-Friis (SL=2.5)"] 
 algorithms = ["aodv", "olsr", "dsdv"]
 num_nodes_list = [20, 30, 40, 50, 60, 70, 80, 90]
@@ -279,7 +279,7 @@ for lm in loss_models:
             stddev_route_acquisition[lm][i] = np.std(values)
 
 # === Plotting ===
-PLOTS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "plots-f30"))
+PLOTS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "plots-alt"))
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 def plot_metric_by_loss_model(x_vals, metric_data, ylabel, title_prefix, xlabel, filename_prefix, yerr_data=None):

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Mitsuba 3 scene for FOBA-vs-Sionna comparison scenario 4
+    Same as scenario 1, but the building spans x=[0,100], y=[-10,10], z=[0,15].
+-->
+<scene version="3.0.0">
+
+    <bsdf type="itu-radio-material" id="mat-concrete">
+        <string name="type" value="concrete"/>
+    </bsdf>
+
+    <bsdf type="itu-radio-material" id="mat-ground">
+        <string name="type" value="concrete"/>
+    </bsdf>
+
+    <shape type="rectangle" id="ground_plane">
+        <ref id="mat-ground"/>
+        <transform name="to_world">
+            <scale x="220.0" y="200.0" z="1.0"/>
+            <translate x="50.0" y="0.0" z="0.0"/>
+        </transform>
+    </shape>
+
+    <shape type="cube" id="building_00">
+        <ref id="mat-concrete"/>
+        <transform name="to_world">
+            <scale x="50.0" y="10.0" z="7.5"/>
+            <translate x="50.0" y="0.0" z="7.5"/>
+        </transform>
+    </shape>
+
+</scene>

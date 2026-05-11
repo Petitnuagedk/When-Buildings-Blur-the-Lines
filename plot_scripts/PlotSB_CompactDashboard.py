@@ -27,6 +27,7 @@ Run from the repository root:
 """
 
 import os
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -37,7 +38,11 @@ from matplotlib.lines import Line2D
 # Configuration
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR  = os.path.join(BASE_DIR, "..", "plots-SB-dashboard")
+
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--output", default=os.path.join(BASE_DIR, "..", "plots-SB-dashboard-alt"))
+_known, _ = _ap.parse_known_args()
+OUT_DIR = _known.output
 
 # Map: model_key -> (friendly label, per-model data folder, filename prefix)
 MODELS = {
@@ -48,10 +53,10 @@ MODELS = {
 }
 
 MODEL_DATA_DIRS = {
-    "FOBA":                               os.path.join(BASE_DIR, "..", "results-con-SB-Foba-output"),
-    "Friis":                              os.path.join(BASE_DIR, "..", "results-con-SB-Frii-output"),
-    "ItuR1411LosPropagationLossModel":    os.path.join(BASE_DIR, "..", "results-con-SB-ItuR-output"),
-    "TwoRayGroundPropagationLossModel":   os.path.join(BASE_DIR, "..", "results-con-SB-TwoR-output"),
+    "FOBA":                               r"C:\Users\hugol\Documents\Firenze\B\j1\SASB-data\cone\results-con-SB-FOBA-alt-output",
+    "Friis":                              r"C:\Users\hugol\Documents\Firenze\B\j1\SASB-data\cone\results-con-SB-Frii-output",
+    "ItuR1411LosPropagationLossModel":    r"C:\Users\hugol\Documents\Firenze\B\j1\SASB-data\cone\results-con-SB-ItuR-output",
+    "TwoRayGroundPropagationLossModel":   r"C:\Users\hugol\Documents\Firenze\B\j1\SASB-data\cone\results-con-SB-TwoR-output",
 }
 
 NUM_NODES_LIST = [50, 100, 150, 200, 300, 500]
@@ -164,10 +169,10 @@ def plot_line_dashboard(stats: dict, out_dir: str) -> None:
 
     fig = plt.figure(figsize=(18, 3.5 * n_rows))
     fig.suptitle("Propagation Model Comparison – All Metrics vs Node Count (Scenario B)",
-                 fontsize=15, fontweight="bold", y=0.98)
+                 fontsize=18, fontweight="bold", y=0.98)
 
     gs = gridspec.GridSpec(n_rows, n_cols, figure=fig,
-                           hspace=0.55, wspace=0.30,
+                           hspace=0.25, wspace=0.30,
                            top=0.93, bottom=0.06, left=0.07, right=0.97)
 
     axes = [fig.add_subplot(gs[r, c])
@@ -189,38 +194,44 @@ def plot_line_dashboard(stats: dict, out_dir: str) -> None:
                     linewidth=1.8, markersize=5, label=model_label)
             ax.fill_between(x, q25, q75, color=color, alpha=0.12)
 
-        ax.set_title(metric_label, fontsize=10, fontweight="bold", pad=4)
-        ax.set_xlabel("Number of nodes", fontsize=8)
+        ax.set_title(metric_label, fontsize=16, fontweight="bold", pad=4)
+        if idx >= n_metrics - n_cols:
+            ax.set_xlabel("Number of nodes", fontsize=15, fontweight="bold")
+        else:
+            ax.set_xlabel("")
         ax.set_xticks(x)
-        ax.set_xticklabels(x, fontsize=7)
-        ax.tick_params(axis="y", labelsize=7)
+        ax.set_xticklabels(x, fontsize=10)
+        ax.tick_params(axis="y", labelsize=10)
         ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    # Last panel → legend
+        # Embed legend in bottom-right of the Stability panel
+        if idx == 1:
+            legend_handles = [
+                Line2D([0], [0],
+                       color=MODEL_COLORS[mk], marker=MODEL_MARKERS[mk],
+                       linewidth=1.8, markersize=7, label=ml)
+                for mk, ml in MODELS.items()
+            ]
+            ax.legend(handles=legend_handles,
+                      title="Propagation model",
+                      title_fontsize=12,
+                      fontsize=11,
+                      loc="lower right",
+                      frameon=True,
+                      framealpha=0.9)
+
+    # Last panel → note only
     ax_leg = axes[-1]
     ax_leg.axis("off")
-    legend_handles = [
-        Line2D([0], [0],
-               color=MODEL_COLORS[mk], marker=MODEL_MARKERS[mk],
-               linewidth=1.8, markersize=7, label=ml)
-        for mk, ml in MODELS.items()
-    ]
-    ax_leg.legend(handles=legend_handles,
-                  title="Propagation model",
-                  title_fontsize=10,
-                  fontsize=10,
-                  loc="center",
-                  frameon=True,
-                  framealpha=0.9)
-    note = ("Solid line = mean over all reachable pairs\n"
-            "Shaded band = interquartile range (Q25–Q75)")
-    ax_leg.text(0.5, 0.15, note,
-                transform=ax_leg.transAxes,
-                ha="center", va="center",
-                fontsize=8, color="#555555",
-                bbox=dict(boxstyle="round,pad=0.4", fc="#f5f5f5", ec="#cccccc"))
+    #note = ("Solid line = mean over all reachable pairs\n"
+    #        "Shaded band = interquartile range (Q25–Q75)")
+    #ax_leg.text(0.5, 0.5, note,
+    #            transform=ax_leg.transAxes,
+    #            ha="center", va="center",
+    #            fontsize=10, color="#555555",
+    #            bbox=dict(boxstyle="round,pad=0.4", fc="#f5f5f5", ec="#cccccc"))
 
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "fig1_line_dashboard.png")
@@ -242,7 +253,7 @@ def plot_heatmap_comparison(stats: dict, out_dir: str) -> None:
                              gridspec_kw={"wspace": 0.30})
     fig.suptitle(
         "Metric Overview by Propagation Model  (row-normalised, 0 = worst · 1 = best)  –  Scenario B",
-        fontsize=13, fontweight="bold", y=1.01
+        fontsize=15, fontweight="bold", y=1.01
     )
 
     for col_idx, (model_key, model_label) in enumerate(zip(model_keys, model_labels)):
@@ -262,20 +273,20 @@ def plot_heatmap_comparison(stats: dict, out_dir: str) -> None:
                     brightness = arr_norm[r, c] if not np.isnan(arr_norm[r, c]) else 0.5
                     text_color = "black" if 0.25 < brightness < 0.85 else "white"
                     ax.text(c, r, txt, ha="center", va="center",
-                            fontsize=6.5, color=text_color)
+                            fontsize=8, color=text_color)
 
         ax.set_xticks(range(len(node_labels)))
-        ax.set_xticklabels(node_labels, fontsize=8)
-        ax.set_xlabel("Number of nodes", fontsize=9)
+        ax.set_xticklabels(node_labels, fontsize=10)
+        ax.set_xlabel("Number of nodes", fontsize=12, fontweight="bold")
 
         if col_idx == 0:
             ax.set_yticks(range(len(metric_labels)))
-            ax.set_yticklabels(metric_labels, fontsize=8)
+            ax.set_yticklabels(metric_labels, fontsize=11)
         else:
             ax.set_yticks(range(len(metric_labels)))
-            ax.set_yticklabels([], fontsize=8)
+            ax.set_yticklabels([], fontsize=10)
 
-        ax.set_title(model_label, fontsize=11, fontweight="bold", pad=6)
+        ax.set_title(model_label, fontsize=13, fontweight="bold", pad=6)
 
         # Thin grid between cells
         ax.set_xticks(np.arange(-0.5, len(node_labels), 1), minor=True)
@@ -287,7 +298,7 @@ def plot_heatmap_comparison(stats: dict, out_dir: str) -> None:
     cbar = fig.colorbar(im, ax=axes, orientation="vertical",
                         fraction=0.012, pad=0.01,
                         label="Row-normalised mean (0 = min, 1 = max)")
-    cbar.ax.tick_params(labelsize=8)
+    cbar.ax.tick_params(labelsize=10)
 
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "fig2_heatmap_comparison.png")

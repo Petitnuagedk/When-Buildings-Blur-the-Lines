@@ -308,7 +308,7 @@ def plot_pair_metrics_heatmap(metrics: Dict[Tuple[int,int], Dict],
 annot = False
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compute path metrics over connectivity matrices from results-con')
-    parser.add_argument('--results-dir', default='results-con-SA-all', help='Root results directory containing scenario subdirectories')
+    parser.add_argument('--results-dir', default='results-con-SB-FOBA-alt', help='Root results directory containing scenario subdirectories')
     parser.add_argument('--scenario', default=None, help='Specific scenario subdirectory (uses all if omitted)')
     parser.add_argument('--out-dir', default=None, help='Directory to store outputs (default: {results-dir}-output)')
     parser.add_argument('--pair-samples', default=None, help='Optional list of fixed pairs as i,j; format: "0,1;2,3"')

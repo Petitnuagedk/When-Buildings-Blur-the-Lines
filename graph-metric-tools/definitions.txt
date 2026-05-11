@@ -1,0 +1,100 @@
+% ============================================================
+%  Formal Definitions: Path Metrics over Dynamic Graphs
+% ============================================================
+
+% --- Setup ---
+% Let $G_t = (V, E_t)$ be the communication graph at discrete time step
+% $t \in \{1, \dots, T\}$, with $|V| = N$ nodes.
+% For a node pair $(u, v)$, define the reachability indicator:
+
+\begin{equation}
+  r_t(u,v) =
+  \begin{cases}
+    1 & \text{if } \exists \text{ path from } u \text{ to } v \text{ in } G_t \\
+    0 & \text{otherwise}
+  \end{cases}
+\end{equation}
+
+% Let $\pi_t(u,v)$ denote the canonical shortest path from $u$ to $v$
+% in $G_t$ when $r_t(u,v) = 1$.
+
+% ============================================================
+%  1. Path Lifetime
+% ============================================================
+% The fraction of time steps in which at least one path from $u$ to $v$ exists.
+
+\begin{equation}
+  \mathcal{L}(u,v)
+  = \frac{1}{T} \sum_{t=1}^{T} r_t(u,v)
+  \;\in [0,1]
+\end{equation}
+
+% ============================================================
+%  2. Path Stability
+% ============================================================
+% Let $\sigma_t = \mathbf{1}[r_t(u,v) \neq r_{t+1}(u,v)]$ be the
+% availability-switch indicator at step $t$.
+
+\begin{equation}
+  \mathcal{S}(u,v)
+  = 1 - \frac{1}{T-1}\sum_{t=1}^{T-1} \sigma_t
+  \;\in [0,1]
+\end{equation}
+
+% A value of 1 means path availability never changes;
+% 0 means it switches at every step.
+
+% ============================================================
+%  3. Path Persistency
+% ============================================================
+% Let $\mathcal{T}^{*} = \{t \in \{1,\dots,T{-}1\} \mid r_t = 1 \wedge r_{t+1} = 1\}$
+% be the set of consecutive available-frame pairs, with $|\mathcal{T}^{*}| = C$.
+
+% -- Exact persistency (path identity) --
+\begin{equation}
+  \mathcal{P}_{\mathrm{exact}}(u,v)
+  = \frac{1}{C}\sum_{t \in \mathcal{T}^{*}}
+    \mathbf{1}\!\left[\pi_t(u,v) = \pi_{t+1}(u,v)\right]
+  \;\in [0,1]
+\end{equation}
+
+% -- Jaccard persistency (node-set overlap) --
+\begin{equation}
+  \mathcal{P}_{\mathrm{Jac}}(u,v)
+  = \frac{1}{C}\sum_{t \in \mathcal{T}^{*}}
+    \frac{|\pi_t \cap \pi_{t+1}|}{|\pi_t \cup \pi_{t+1}|}
+  \;\in [0,1]
+\end{equation}
+
+% where $\pi_t$ is treated as the set of nodes on the path.
+% Both quantities are defined as 0 when $C = 0$.
+
+% ============================================================
+%  4. Path Length
+% ============================================================
+% Let $\ell_t(u,v) = |\pi_t(u,v)| - 1$ be the hop count (number of edges)
+% of the shortest path at step $t$.
+% Let $\mathcal{T}_r = \{t \mid r_t(u,v) = 1\}$ be the available set.
+
+% -- Mean path length --
+\begin{equation}
+  \bar{\ell}(u,v)
+  = \frac{1}{|\mathcal{T}_r|}\sum_{t \in \mathcal{T}_r} \ell_t(u,v)
+\end{equation}
+
+% -- Normalised mean path length (by maximum possible diameter $N-1$) --
+\begin{equation}
+  \bar{\ell}_{\mathrm{norm}}(u,v)
+  = \frac{\bar{\ell}(u,v)}{N - 1}
+  \;\in (0,1]
+\end{equation}
+
+% -- Mean inverse path length (reachability-weighted efficiency) --
+\begin{equation}
+  \bar{\ell}^{-1}(u,v)
+  = \frac{1}{|\mathcal{T}_r|}
+    \sum_{\substack{t \in \mathcal{T}_r \\ \ell_t > 0}}
+    \frac{1}{\ell_t(u,v)}
+\end{equation}
+
+% All length-based quantities are defined as 0 when $\mathcal{T}_r = \emptyset$.
