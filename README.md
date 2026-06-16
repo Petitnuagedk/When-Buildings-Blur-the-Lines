@@ -245,7 +245,16 @@ Each leaf folder contains:
 
 If you use this code, please cite:
 
-> **Reference paper**: *To be added upon publication*
+> **Reference paper**:
+@inproceedings{le2025buildings,
+  title={When Buildings Blur the Lines: Revealing the Hidden Performance Equivalences in MANET Routing Protocols},
+  author={Le Dirach, Hugo and Boyer, Marc and Lochin, Emmanuel},
+  booktitle={2025 23rd International Symposium on Network Computing and Applications (NCA)},
+  pages={123--130},
+  year={2025},
+  organization={IEEE}
+}
+
 
 ## Author
 
